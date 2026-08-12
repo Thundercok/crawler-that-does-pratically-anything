@@ -8,6 +8,9 @@ members = [
     "spider_agent_types",
     "spider_agent_html",
     "spider_mcp",
+    [[example]]
+name = "cv_job_crawler"
+path = "cv_job_crawler.rs"
     # internal
     "examples",
     "benches"]

@@ -1,9 +1,9 @@
+use serde_json::json;
 use spider::tokio;
 use spider::website::Website;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
-use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     website.configuration.respect_robots_txt = true;
     website.configuration.user_agent = Some("CV-Skill-Gap-Bot/1.0".into());
     website.configuration.delay = 300; // 300ms politeness gap
-    website.configuration.limit = 20;  // Keep initial runs small for debugging
+    website.configuration.limit = 20; // Keep initial runs small for debugging
 
     // 3. Setup a flat file stream mapping output to local storage
     let local_file = OpenOptions::new()
