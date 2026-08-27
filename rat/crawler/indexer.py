@@ -120,6 +120,15 @@ class Indexer:
             ext = path.suffix.lower()
             md5_hash = get_file_md5_fast(str(path))
 
+            # Extract provenance (source URLs, originating domain, download app)
+            from rat.crawler.provenance import provenance_extractor
+            provenance = provenance_extractor.get_provenance(str(path))
+            if provenance.get("provenance_text"):
+                if content_text:
+                    content_text = f"{content_text}\n\n[File Provenance]: {provenance['provenance_text']}"
+                else:
+                    content_text = f"[File Provenance]: {provenance['provenance_text']}"
+
             doc = {
                 "file_path": str(path),
                 "file_name": file_name,

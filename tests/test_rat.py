@@ -101,6 +101,34 @@ class TestRatAssistant(unittest.TestCase):
         found_names = [r.file_name for r in res["results"]]
         self.assertIn("IMG_9921.jpg", found_names)
 
+    def test_exclusion_parsing(self) -> None:
+        ctx = ContextParser.parse_query("tìm file kế hoạch không phải word trừ pdf")
+        self.assertIn(".docx", ctx.excluded_extensions)
+        self.assertIn(".pdf", ctx.excluded_extensions)
+        self.assertNotIn(".docx", ctx.extensions)
+        self.assertNotIn(".pdf", ctx.extensions)
+        self.assertIn("kế", ctx.keywords)
+
+    def test_provenance_search(self) -> None:
+        doc = {
+            "file_path": "/tmp/overleaf_paper.pdf",
+            "file_name": "Paper_Draft.pdf",
+            "file_ext": ".pdf",
+            "file_size": 4096,
+            "created_at": 1700000000.0,
+            "modified_at": 1700000000.0,
+            "md5_hash": "pdf12345",
+            "content_text": "Báo cáo nghiên cứu thuật toán ALNS-DDQN.\n\n[File Provenance]: Tải qua ứng dụng: Safari | Tải từ trang web / Nguồn: www.overleaf.com",
+            "summary": "Bản nháp bài báo Overleaf",
+            "indexed_at": 1700000000.0,
+        }
+        self.db.upsert_document(doc)
+
+        res = self.engine.search("file pdf tải từ overleaf")
+        self.assertTrue(len(res["results"]) > 0)
+        top = res["results"][0]
+        self.assertEqual(top.file_name, "Paper_Draft.pdf")
+
 
 if __name__ == "__main__":
     unittest.main()

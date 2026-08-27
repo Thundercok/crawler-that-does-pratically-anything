@@ -81,6 +81,7 @@ class VectorCache:
         self,
         query_vector: np.ndarray,
         extensions: Optional[List[str]] = None,
+        excluded_extensions: Optional[List[str]] = None,
         date_min: Optional[float] = None,
         date_max: Optional[float] = None,
         limit: int = 50,
@@ -95,12 +96,16 @@ class VectorCache:
             if self._matrix.size == 0 or len(self._records) == 0 or query_vector.size == 0:
                 return []
 
-            # Filter indices by extension and date if specified
-            if extensions or date_min is not None or date_max is not None:
+            # Filter indices by extension, excluded_extension, and date if specified
+            if extensions or excluded_extensions or date_min is not None or date_max is not None:
                 ext_set = set(e.lower() for e in extensions) if extensions else None
+                ex_set = set(e.lower() for e in excluded_extensions) if excluded_extensions else None
                 valid_indices = []
                 for idx, r in enumerate(self._records):
-                    if ext_set and r["file_ext"].lower() not in ext_set:
+                    r_ext = r["file_ext"].lower()
+                    if ext_set and r_ext not in ext_set:
+                        continue
+                    if ex_set and r_ext in ex_set:
                         continue
                     if date_min is not None and r["modified_at"] < date_min:
                         continue

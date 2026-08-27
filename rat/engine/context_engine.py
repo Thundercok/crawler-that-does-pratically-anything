@@ -138,6 +138,16 @@ CONCEPT_ONTOLOGY: Dict[str, Dict[str, Any]] = {
         "extensions": [".png", ".jpg", ".jpeg", ".webp"],
         "intent_desc": "Hình ảnh phương tiện giao thông, xe hơi, ô tô hoặc xe máy",
     },
+    "provenance_sources": {
+        "triggers": [
+            "tai tu", "tai ve tu", "link web", "google docs", "google drive", "google slides",
+            "overleaf", "telegram", "zalo", "safari", "chrome", "github", "slack", "messenger",
+            "nguon web", "trang web"
+        ],
+        "synonyms": ["google docs", "google drive", "google slides", "overleaf", "telegram", "zalo", "safari", "chrome", "github", "slack", "web", "download"],
+        "extensions": [],
+        "intent_desc": "Tệp tin được tải về từ nguồn web hoặc ứng dụng cụ thể (Google Docs, Overleaf, Telegram, Safari, Chrome...)",
+    },
 }
 
 

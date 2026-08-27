@@ -64,6 +64,8 @@ class ParsedContext:
         raw_query: str,
         keywords: List[str],
         extensions: Optional[List[str]] = None,
+        excluded_extensions: Optional[List[str]] = None,
+        excluded_keywords: Optional[List[str]] = None,
         date_min: Optional[float] = None,
         date_max: Optional[float] = None,
         time_desc: Optional[str] = None,
@@ -72,6 +74,8 @@ class ParsedContext:
         self.raw_query = raw_query
         self.keywords = keywords
         self.extensions = extensions or []
+        self.excluded_extensions = excluded_extensions or []
+        self.excluded_keywords = excluded_keywords or []
         self.date_min = date_min
         self.date_max = date_max
         self.time_desc = time_desc
@@ -82,6 +86,8 @@ class ParsedContext:
             "raw_query": self.raw_query,
             "keywords": self.keywords,
             "extensions": self.extensions,
+            "excluded_extensions": self.excluded_extensions,
+            "excluded_keywords": self.excluded_keywords,
             "date_min": self.date_min,
             "date_max": self.date_max,
             "time_desc": self.time_desc,
@@ -190,6 +196,28 @@ class ContextParser:
         desc_str = ", ".join(detected_descriptions) if detected_descriptions else None
         return detected_extensions, desc_str
 
+    @staticmethod
+    def parse_exclusions(query: str) -> Tuple[List[str], List[str]]:
+        """Detect excluded file extensions and excluded terms (e.g. 'không phải word', 'trừ pdf')."""
+        q_norm = remove_accents(query)
+        excluded_exts: List[str] = []
+        excluded_kw: List[str] = []
+
+        # Check for negation patterns like "không phải X", "khong lay X", "trừ X", "loại trừ X", "except X", "not X"
+        neg_matches = re.finditer(r"\b(khong phai|khong lay|khong chua|tru|loai tru|except|not|without)\s+([\w\.\-]+)", q_norm)
+        for m in neg_matches:
+            target = m.group(2).strip()
+            # Check if target matches an extension
+            for pattern, exts in TYPE_PATTERNS.items():
+                if re.search(pattern, target):
+                    for e in exts:
+                        if e not in excluded_exts:
+                            excluded_exts.append(e)
+            if target not in [e.replace(".", "") for e in excluded_exts]:
+                excluded_kw.append(target)
+
+        return excluded_exts, excluded_kw
+
     @classmethod
     def parse_query(cls, raw_query: str) -> ParsedContext:
         """Parse natural language query into structured context constraints & keywords."""
@@ -199,19 +227,27 @@ class ContextParser:
 
         date_min, date_max, time_desc = cls.parse_temporal_context(cleaned_raw)
         extensions, type_desc = cls.parse_file_types(cleaned_raw)
+        excluded_extensions, excluded_keywords = cls.parse_exclusions(cleaned_raw)
 
-        # Extract core keywords by removing temporal words, type words, and stopwords
+        # If an extension is in excluded_extensions, remove it from extensions
+        if excluded_extensions and extensions:
+            extensions = [e for e in extensions if e not in excluded_extensions]
+
+        # Extract core keywords by removing temporal words, type words, exclusion words, and stopwords
         q_norm = remove_accents(cleaned_raw)
 
         # Tokenize by non-alphanumeric
         tokens = re.findall(r"[\w\.\-]+", cleaned_raw)
         clean_keywords: List[str] = []
 
+        exclusion_tokens = set([remove_accents(k).lower() for k in excluded_keywords])
+        exclusion_markers = {"khong", "phai", "lay", "chua", "tru", "loai", "except", "not", "without"}
+
         for token in tokens:
             t_norm = remove_accents(token).lower()
             if len(t_norm) <= 1:
                 continue
-            if t_norm in STOPWORDS:
+            if t_norm in STOPWORDS or t_norm in exclusion_markers or t_norm in exclusion_tokens:
                 continue
             # Also check if token is part of detected temporal or type words
             if t_norm in [
@@ -228,6 +264,8 @@ class ContextParser:
             raw_query=cleaned_raw,
             keywords=clean_keywords,
             extensions=extensions,
+            excluded_extensions=excluded_extensions,
+            excluded_keywords=excluded_keywords,
             date_min=date_min,
             date_max=date_max,
             time_desc=time_desc,

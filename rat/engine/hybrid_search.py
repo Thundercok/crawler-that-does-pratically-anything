@@ -76,10 +76,12 @@ class SearchEngine:
 
         # Use explicitly provided extensions or recommended concept extensions
         search_exts = context.extensions if context.extensions else (enriched.recommended_extensions if enriched.matched_concepts else None)
+        excluded_exts = context.excluded_extensions if context.excluded_extensions else None
 
         sparse_candidates = self.db.search_candidates(
             keywords=all_keywords,
             extensions=search_exts,
+            excluded_extensions=excluded_exts,
             date_min=context.date_min,
             date_max=context.date_max,
             limit=45
@@ -91,6 +93,7 @@ class SearchEngine:
             dense_chunk_candidates = self.vector_cache.search(
                 query_vector=query_vector,
                 extensions=search_exts,
+                excluded_extensions=excluded_exts,
                 date_min=context.date_min,
                 date_max=context.date_max,
                 limit=45

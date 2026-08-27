@@ -241,6 +241,7 @@ class Database:
         self,
         keywords: List[str],
         extensions: Optional[List[str]] = None,
+        excluded_extensions: Optional[List[str]] = None,
         date_min: Optional[float] = None,
         date_max: Optional[float] = None,
         limit: int = 50
@@ -258,6 +259,11 @@ class Database:
             ext_placeholders = ",".join(["?"] * len(extensions))
             where_clauses.append(f"d.file_ext IN ({ext_placeholders})")
             params.extend([e.lower() for e in extensions])
+
+        if excluded_extensions:
+            ex_placeholders = ",".join(["?"] * len(excluded_extensions))
+            where_clauses.append(f"d.file_ext NOT IN ({ex_placeholders})")
+            params.extend([e.lower() for e in excluded_extensions])
 
         if date_min is not None:
             where_clauses.append("d.modified_at >= ?")
@@ -423,6 +429,7 @@ class Database:
         self,
         query_vector: np.ndarray,
         extensions: Optional[List[str]] = None,
+        excluded_extensions: Optional[List[str]] = None,
         date_min: Optional[float] = None,
         date_max: Optional[float] = None,
         limit: int = 50,
@@ -443,6 +450,11 @@ class Database:
             ext_placeholders = ",".join(["?"] * len(extensions))
             where_clauses.append(f"d.file_ext IN ({ext_placeholders})")
             params.extend([e.lower() for e in extensions])
+
+        if excluded_extensions:
+            ex_placeholders = ",".join(["?"] * len(excluded_extensions))
+            where_clauses.append(f"d.file_ext NOT IN ({ex_placeholders})")
+            params.extend([e.lower() for e in excluded_extensions])
 
         if date_min is not None:
             where_clauses.append("d.modified_at >= ?")
