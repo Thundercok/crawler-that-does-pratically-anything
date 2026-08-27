@@ -10,6 +10,7 @@ import sys
 from PyQt6.QtWidgets import QApplication
 
 from rat.cli import main as cli_main
+from rat.ui.finder_window import FinderWindow
 from rat.ui.spotlight_window import SpotlightWindow
 
 logging.basicConfig(
@@ -29,12 +30,17 @@ def activate_macos_app() -> None:
         pass
 
 
-def run_gui() -> None:
-    """Launch Spotlight GUI application."""
+def run_gui(mode: str = "finder") -> None:
+    """Launch Finder Window (default) or Spotlight Window."""
     activate_macos_app()
     app = QApplication(sys.argv)
-    app.setApplicationName("rat — Smart File Finder")
-    window = SpotlightWindow()
+    app.setApplicationName("rat — Smart macOS File Finder")
+
+    if mode == "spotlight":
+        window = SpotlightWindow()
+    else:
+        window = FinderWindow()
+
     window.show()
     window.raise_()
     window.activateWindow()
@@ -45,8 +51,10 @@ def run_gui() -> None:
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] in ("search", "index", "status", "ask", "dedup", "--help", "-h"):
         cli_main()
+    elif len(sys.argv) > 1 and sys.argv[1] == "spotlight":
+        run_gui(mode="spotlight")
     else:
-        run_gui()
+        run_gui(mode="finder")
 
 
 if __name__ == "__main__":
