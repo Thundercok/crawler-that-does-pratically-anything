@@ -191,12 +191,12 @@ class ContextEngine:
         recommended_exts: Set[str] = set(base_ctx.extensions)
         intent_summaries: List[str] = []
 
-        # Check concept triggers
+        # Check concept triggers with exact word boundary matching
         for concept_id, concept_data in CONCEPT_ONTOLOGY.items():
             triggers = concept_data["triggers"]
             is_matched = False
             for trig in triggers:
-                if trig in q_norm:
+                if re.search(r"\b" + re.escape(trig) + r"\b", q_norm):
                     is_matched = True
                     break
 

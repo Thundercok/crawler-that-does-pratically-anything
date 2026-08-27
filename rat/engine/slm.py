@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -30,21 +31,32 @@ class SLMEngine:
         self.ollama_url = (ollama_url or config.ollama_url or "http://localhost:11434").rstrip("/")
         self.model = model or config.ollama_model or DEFAULT_SLM_MODEL
         self._available_models_cache: List[str] = []
+        self._last_service_check: float = 0.0
+        self._service_available: bool = False
 
     def is_service_running(self) -> bool:
-        """Check if local Ollama daemon is reachable."""
+        """Check if local Ollama daemon is reachable (cached with 30s TTL)."""
+        now = time.time()
+        if now - self._last_service_check < 30.0:
+            return self._service_available
+
+        self._last_service_check = now
         try:
             req = urllib.request.Request(f"{self.ollama_url}/api/tags", method="GET")
-            with urllib.request.urlopen(req, timeout=1.5) as response:
-                return response.status == 200
+            with urllib.request.urlopen(req, timeout=0.3) as response:
+                self._service_available = (response.status == 200)
+                return self._service_available
         except Exception:
+            self._service_available = False
             return False
 
     def list_installed_models(self) -> List[str]:
         """Fetch list of local model names installed in Ollama."""
+        if not self.is_service_running():
+            return []
         try:
             req = urllib.request.Request(f"{self.ollama_url}/api/tags", method="GET")
-            with urllib.request.urlopen(req, timeout=2.0) as response:
+            with urllib.request.urlopen(req, timeout=0.5) as response:
                 data = json.loads(response.read().decode("utf-8"))
                 models = [m.get("name", "") for m in data.get("models", [])]
                 self._available_models_cache = models
@@ -55,6 +67,8 @@ class SLMEngine:
 
     def is_model_installed(self, model_name: Optional[str] = None) -> bool:
         """Check if target model (e.g. qwen2.5:1.5b) is downloaded."""
+        if not self.is_service_running():
+            return False
         target = (model_name or self.model).lower()
         installed = self.list_installed_models()
         return any(target in m.lower() or m.lower().startswith(target) for m in installed)

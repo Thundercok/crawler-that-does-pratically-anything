@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger("rat.extractors")
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 MAX_CHARS_PER_DOC = 100_000  # Cap content length to keep search snappy
 

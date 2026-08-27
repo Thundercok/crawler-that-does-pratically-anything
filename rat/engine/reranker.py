@@ -156,7 +156,8 @@ class Reranker:
         modified_at = doc.get("modified_at", 0)
 
         name_norm = remove_accents(file_name).lower()
-        content_norm = remove_accents(content).lower()
+        content_sample = content[:4000] if len(content) > 4000 else content
+        content_norm = remove_accents(content_sample).lower()
         stem_norm = Path(name_norm).stem.lower()
 
         # 1. Extension match bonus & penalty
