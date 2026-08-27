@@ -129,6 +129,51 @@ class TestRatAssistant(unittest.TestCase):
         top = res["results"][0]
         self.assertEqual(top.file_name, "Paper_Draft.pdf")
 
+    def test_deduplication_and_version_trees(self) -> None:
+        from rat.crawler.dedup import SmartDeduplicationEngine, normalize_stem_for_versioning
+        stem = normalize_stem_for_versioning("Bao_cao_final_v2(1).docx")
+        self.assertEqual(stem, "bao cao")
+
+        # Insert 2 versions of a document
+        doc_v1 = {
+            "file_path": "/tmp/Bao_cao_v1.docx",
+            "file_name": "Bao_cao_v1.docx",
+            "file_ext": ".docx",
+            "file_size": 1024,
+            "created_at": 1700000000.0,
+            "modified_at": 1700000000.0,
+            "md5_hash": "hash_v1",
+            "content_text": "Báo cáo tiến độ dự án phiên bản 1",
+            "summary": "",
+            "indexed_at": 1700000000.0,
+        }
+        doc_v2 = {
+            "file_path": "/tmp/Bao_cao_final.docx",
+            "file_name": "Bao_cao_final.docx",
+            "file_ext": ".docx",
+            "file_size": 1050,
+            "created_at": 1700001000.0,
+            "modified_at": 1700001000.0,
+            "md5_hash": "hash_v2",
+            "content_text": "Báo cáo tiến độ dự án phiên bản hoàn thiện",
+            "summary": "",
+            "indexed_at": 1700001000.0,
+        }
+        self.db.upsert_document(doc_v1)
+        self.db.upsert_document(doc_v2)
+
+        dedup = SmartDeduplicationEngine(self.db)
+        trees = dedup.find_version_trees(min_versions=2)
+        self.assertTrue(len(trees) >= 1)
+        tree = [t for t in trees if t.canonical_name == "bao cao"][0]
+        self.assertEqual(tree.count, 2)
+        self.assertEqual(tree.latest_doc["file_name"], "Bao_cao_final.docx")
+
+        # Check document version info
+        v_info = dedup.get_document_version_info("/tmp/Bao_cao_final.docx")
+        self.assertIsNotNone(v_info)
+        self.assertTrue(v_info["is_latest"])
+
 
 if __name__ == "__main__":
     unittest.main()

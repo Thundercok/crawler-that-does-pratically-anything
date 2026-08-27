@@ -43,7 +43,7 @@ def run_gui() -> None:
 
 
 def main() -> None:
-    if len(sys.argv) > 1 and sys.argv[1] in ("search", "index", "status", "ask", "--help", "-h"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("search", "index", "status", "ask", "dedup", "--help", "-h"):
         cli_main()
     else:
         run_gui()

@@ -19,6 +19,7 @@ from rat.config import config
 from rat.crawler.db import Database
 from rat.crawler.indexer import Indexer
 from rat.engine.hybrid_search import SearchEngine
+from rat.engine.reranker import format_file_size, format_relative_time
 from rat.ui.preview_panel import open_file_default, reveal_in_finder
 
 console = Console()
@@ -154,6 +155,42 @@ def cmd_ask(file_query: str, question: str) -> None:
     console.print(Panel(answer, title="💡 Câu trả lời từ SLM (Qwen2.5 / Apple Silicon)", border_style="green"))
 
 
+def cmd_dedup() -> None:
+    """Find duplicate files and semantic document version trees."""
+    from rat.crawler.dedup import dedup_engine
+    console.print(Panel.fit("[bold cyan]🌳 Smart Deduplication & Version Tree Analyzer[/bold cyan]", border_style="cyan"))
+
+    with console.status("[bold green]Đang phân tích cấu trúc trùng lặp và các phiên bản sửa đổi..."):
+        exact_dups = dedup_engine.find_exact_duplicates()
+        version_trees = dedup_engine.find_version_trees(min_versions=2)
+
+    # 1. Exact Duplicates
+    if exact_dups:
+        total_wasted = sum(g["wasted_space_bytes"] for g in exact_dups)
+        from rat.engine.reranker import format_file_size
+        console.print(f"\n[bold red]⚠️ Phát hiện {len(exact_dups)} nhóm tệp trùng lặp 100% (Lãng phí: ~{format_file_size(total_wasted)}):[/bold red]")
+        for idx, g in enumerate(exact_dups[:10], 1):
+            console.print(f"\n  [bold yellow]Nhóm {idx}:[/bold yellow] {g['copy_count']} bản sao • Kích thước: {format_file_size(g['file_size'])}")
+            for f in g["files"]:
+                console.print(f"    • [white]{f['file_name']}[/white]  [dim]({f['modified_formatted']})[/dim]\n      [blue]{f['file_path']}[/blue]")
+    else:
+        console.print("\n[bold green]✓ Không có tệp nào bị nhân bản 100% (MD5).[/bold green]")
+
+    # 2. Semantic Version Trees
+    if version_trees:
+        console.print(f"\n[bold green]📁 Phát hiện {len(version_trees)} cây phiên bản tài liệu (Document Revision Trees):[/bold green]")
+        for idx, vt in enumerate(version_trees[:10], 1):
+            latest = vt.latest_doc
+            console.print(f"\n  [bold cyan]Cây {idx}:[/bold cyan] [bold white]{vt.canonical_name.upper()}[/bold white] ({vt.file_ext}) — {vt.count} phiên bản")
+            for doc in vt.documents:
+                is_latest = (doc["file_path"] == latest["file_path"]) if latest else False
+                badge = "[bold green]🎯 BẢN MỚI NHẤT[/bold green]" if is_latest else "[dim]Bản cũ[/dim]"
+                console.print(f"    • {badge} [white]{doc['file_name']}[/white]  [dim]({format_relative_time(doc['modified_at'])})[/dim]")
+                console.print(f"      [blue]{doc['file_path']}[/blue]")
+    else:
+        console.print("\n[dim]Không phát hiện cây phiên bản nào.[/dim]")
+
+
 def cmd_stats() -> None:
     """Print indexing statistics."""
     from rat.engine.slm import slm_engine
@@ -193,6 +230,9 @@ def main() -> None:
     ask_parser.add_argument("file_query", help="Query to identify the file")
     ask_parser.add_argument("question", help="Question to ask about the file")
 
+    # Dedup & Version Tree command
+    subparsers.add_parser("dedup", help="Find duplicate files and document revision trees")
+
     # Status command
     subparsers.add_parser("status", help="Show index statistics")
 
@@ -204,6 +244,8 @@ def main() -> None:
         cmd_search(args.query, limit=args.limit, open_first=args.open, reveal_first=args.finder)
     elif args.command == "ask":
         cmd_ask(args.file_query, args.question)
+    elif args.command == "dedup":
+        cmd_dedup()
     elif args.command == "status":
         cmd_stats()
     else:

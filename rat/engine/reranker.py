@@ -70,6 +70,7 @@ class SearchResultItem:
         score: float,
         explanation: str,
         snippet: str,
+        version_info: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.file_path = file_path
         self.file_name = file_name
@@ -81,6 +82,7 @@ class SearchResultItem:
         self.score = score
         self.explanation = explanation
         self.snippet = snippet
+        self.version_info = version_info
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -94,6 +96,7 @@ class SearchResultItem:
             "score": round(self.score, 2),
             "explanation": self.explanation,
             "snippet": self.snippet,
+            "version_info": self.version_info,
         }
 
 
@@ -276,7 +279,22 @@ class Reranker:
         top_items = scored_items[:top_k]
 
         results = []
+        from rat.crawler.dedup import dedup_engine
+
         for score, doc, reasons, snippet in top_items:
+            # Check version tree info for top items
+            version_info = None
+            try:
+                version_info = dedup_engine.get_document_version_info(doc["file_path"])
+                if version_info and version_info.get("total_versions", 0) > 1:
+                    total_v = version_info["total_versions"]
+                    if version_info.get("is_latest"):
+                        reasons.insert(0, f"🎯 Bản mới nhất (Có {total_v} bản sửa đổi)")
+                    else:
+                        reasons.insert(0, f"⚠️ Bản cũ hơn (Bản mới: {version_info.get('latest_file_name')})")
+            except Exception:
+                pass
+
             # Build user friendly reason explanation
             reason_text = " • ".join(reasons) if reasons else f"Tệp phù hợp với ngữ cảnh ({doc['file_ext'].upper()})"
             item = SearchResultItem(
@@ -288,6 +306,7 @@ class Reranker:
                 score=score,
                 explanation=reason_text,
                 snippet=snippet,
+                version_info=version_info,
             )
             results.append(item)
 
