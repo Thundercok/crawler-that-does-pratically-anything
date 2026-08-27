@@ -127,9 +127,9 @@ def cmd_search(query: str, limit: int = 10, open_first: bool = False, reveal_fir
 
 
 def cmd_ask(file_query: str, question: str) -> None:
-    """Find file and ask the local SLM to answer question about its content."""
+    """Find file and ask the local AI/SLM to answer questions about its content."""
     from rat.crawler.extractors import extract_document_content
-    from rat.engine.slm import slm_engine
+    from rat.engine.qa_engine import qa_engine
 
     engine = SearchEngine()
     response = engine.search(file_query, limit=1)
@@ -144,15 +144,21 @@ def cmd_ask(file_query: str, question: str) -> None:
         f"📄 [bold white]{top_file.file_name}[/bold white]\n"
         f"[dim]{top_file.file_path}[/dim]\n"
         f"❓ Câu hỏi: [bold yellow]{question}[/bold yellow]",
-        title="🧠 'rat' SLM Document Q&A",
+        title="🧠 'rat' In-Situ Document Assistant",
         border_style="blue"
     ))
 
-    with console.status("[bold green]SLM đang phân tích tài liệu và suy luận..."):
+    with console.status("[bold green]Đang phân tích tài liệu và suy luận câu trả lời..."):
         content = extract_document_content(top_file.file_path)
-        answer = slm_engine.ask_document(content, question)
+        qa_result = qa_engine.answer_question(content, question, file_name=top_file.file_name)
 
-    console.print(Panel(answer, title="💡 Câu trả lời từ SLM (Qwen2.5 / Apple Silicon)", border_style="green"))
+    answer_text = qa_result["answer"]
+    engine_badge = qa_result["engine"]
+    console.print(Panel(
+        f"{answer_text}\n\n[dim]⚡ Bộ máy xử lý: {engine_badge}[/dim]",
+        title="💡 Kết quả Hỏi - Đáp Tài liệu",
+        border_style="green"
+    ))
 
 
 def cmd_dedup() -> None:

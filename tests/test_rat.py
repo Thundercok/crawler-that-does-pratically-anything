@@ -174,6 +174,23 @@ class TestRatAssistant(unittest.TestCase):
         self.assertIsNotNone(v_info)
         self.assertTrue(v_info["is_latest"])
 
+    def test_document_qa_engine(self) -> None:
+        from rat.engine.qa_engine import qa_engine
+        doc_text = (
+            "Dự án NAMI triển khai nghiên cứu về tối ưu hóa lộ trình xe tự hành.\n"
+            "Tổng ngân sách phê duyệt cho năm 2026 là 500.000.000 VNĐ.\n"
+            "Người phụ trách chính: Huỳnh Nhật Huy."
+        )
+        res = qa_engine.answer_question(
+            doc_text=doc_text,
+            question="Tổng ngân sách dự án là bao nhiêu?",
+            file_name="NAMI_Project.docx",
+            use_cloud_if_available=False
+        )
+        self.assertIsNotNone(res)
+        self.assertIn("500.000.000", res["answer"])
+        self.assertTrue(len(res["snippets"]) > 0)
+
 
 if __name__ == "__main__":
     unittest.main()
