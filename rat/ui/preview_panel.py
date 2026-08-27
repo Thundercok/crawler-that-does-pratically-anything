@@ -220,4 +220,11 @@ class PreviewPanel(QFrame):
             self.reason_box.hide()
 
         snippet_text = item.snippet if item.snippet else "(Không có nội dung trích đoạn xem trước)"
-        self.preview_text.setPlainText(snippet_text)
+        if ext_clean in [".png", ".jpg", ".jpeg", ".webp"]:
+            # Format visual headers nicely
+            if "Visual Concepts" in snippet_text or "Detected Text" in snippet_text:
+                self.preview_text.setPlainText(snippet_text)
+            else:
+                self.preview_text.setPlainText(f"🖼️ Hình ảnh: {item.file_name}\n\n{snippet_text}")
+        else:
+            self.preview_text.setPlainText(snippet_text)

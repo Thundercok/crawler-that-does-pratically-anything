@@ -46,7 +46,7 @@ TYPE_PATTERNS: Dict[str, List[str]] = {
     # PowerPoint
     r"\b(powerpoint|pptx?|slide|thuyet trinh|bai giang|presentation)\b": [".pptx", ".ppt"],
     # Image
-    r"\b(hinh anh|anh|photo|image|picture|png|jpe?g|webp)\b": [".png", ".jpg", ".jpeg", ".webp"],
+    r"\b(hinh anh|anh|hinh|photo|image|picture|png|jpe?g|webp|screenshot|chup man hinh|cap man hinh|buc anh)\b": [".png", ".jpg", ".jpeg", ".webp"],
     # Code
     r"\b(code|ma nguon|python|script|py|javascript|js|typescript|ts|html|css|json|sql|sh)\b": [
         ".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".json", ".yaml", ".yml", ".sh", ".sql"

@@ -79,6 +79,65 @@ CONCEPT_ONTOLOGY: Dict[str, Dict[str, Any]] = {
         "extensions": [".py", ".pdf", ".docx", ".json"],
         "intent_desc": "Mã nguồn hoặc tài liệu về công cụ cào dữ liệu web (Spider/Crawler)",
     },
+    "visual_nature_landscapes": {
+        "triggers": [
+            "hoang hon", "binh minh", "bien", "bai bien", "nui", "doi nui", "phong canh",
+            "thien nhien", "bau troi", "may", "rung", "cay coi", "hoa", "vuon hoa", "chieu ta"
+        ],
+        "synonyms": ["hoàng hôn", "bình minh", "biển", "bãi biển", "phong cảnh", "thiên nhiên", "bầu trời", "núi", "rừng", "sunset", "beach", "nature", "landscape", "sky"],
+        "extensions": [".png", ".jpg", ".jpeg", ".webp"],
+        "intent_desc": "Hình ảnh phong cảnh thiên nhiên, hoàng hôn, bãi biển hoặc cây cối",
+    },
+    "visual_pets_animals": {
+        "triggers": [
+            "cho", "cun", "meo", "thu cung", "vat nuoi", "dong vat", "chim", "ca", "pet", "dog", "cat"
+        ],
+        "synonyms": ["chó", "cún", "mèo", "thú cưng", "vật nuôi", "động vật", "dog", "puppy", "cat", "kitten", "pet", "animal"],
+        "extensions": [".png", ".jpg", ".jpeg", ".webp"],
+        "intent_desc": "Hình ảnh thú cưng, chó, mèo hoặc động vật",
+    },
+    "visual_food_dining": {
+        "triggers": [
+            "do an", "mon an", "am thuc", "an uong", "ca phe", "cafe", "tra", "pizza",
+            "banh ngot", "trai cay", "bua an", "quan an", "nha hang"
+        ],
+        "synonyms": ["đồ ăn", "món ăn", "ẩm thực", "cà phê", "cafe", "pizza", "bánh ngọt", "trái cây", "food", "dining", "dish", "coffee"],
+        "extensions": [".png", ".jpg", ".jpeg", ".webp"],
+        "intent_desc": "Hình ảnh đồ ăn, món ăn, đồ uống hoặc ẩm thực",
+    },
+    "visual_receipt_id": {
+        "triggers": [
+            "anh hoa don", "anh chuyen khoan", "anh sao ke", "can cuoc", "cccd", "cmnd",
+            "bang lai xe", "ho chieu", "ma qr", "qr chuyen tien", "bill chuyen khoan"
+        ],
+        "synonyms": ["hóa đơn", "biên lai", "chuyển khoản", "sao kê", "căn cước", "cccd", "bằng lái xe", "hộ chiếu", "mã qr", "receipt", "bill", "payment", "id card"],
+        "extensions": [".png", ".jpg", ".jpeg", ".webp", ".pdf"],
+        "intent_desc": "Hình ảnh hóa đơn, biên lai thanh toán, mã QR hoặc giấy tờ tùy thân",
+    },
+    "visual_charts_diagrams": {
+        "triggers": [
+            "bieu do", "do thi", "so do", "thong ke", "chart", "diagram", "graph", "infographic"
+        ],
+        "synonyms": ["biểu đồ", "đồ thị", "sơ đồ", "bảng biểu", "thống kê", "chart", "diagram", "graph", "plot"],
+        "extensions": [".png", ".jpg", ".jpeg", ".webp", ".pptx", ".pdf"],
+        "intent_desc": "Hình ảnh hoặc slide chứa biểu đồ, đồ thị và sơ đồ thống kê",
+    },
+    "visual_screenshots": {
+        "triggers": [
+            "anh chup man hinh", "screenshot", "cap man hinh", "anh giao dien", "screen capture"
+        ],
+        "synonyms": ["ảnh chụp màn hình", "screenshot", "chụp màn hình", "giao diện", "màn hình", "screen capture", "display"],
+        "extensions": [".png", ".jpg", ".jpeg", ".webp"],
+        "intent_desc": "Ảnh chụp màn hình (screenshot) hoặc giao diện phần mềm",
+    },
+    "visual_vehicles": {
+        "triggers": [
+            "xe hoi", "o to", "xe may", "xe dap", "may bay", "car", "motorcycle", "vehicle"
+        ],
+        "synonyms": ["xe hơi", "ô tô", "xe máy", "xe đạp", "máy bay", "xe cộ", "car", "vehicle", "automobile", "motorcycle"],
+        "extensions": [".png", ".jpg", ".jpeg", ".webp"],
+        "intent_desc": "Hình ảnh phương tiện giao thông, xe hơi, ô tô hoặc xe máy",
+    },
 }
 
 

@@ -162,19 +162,25 @@ def extract_text_from_plaintext(file_path: str) -> str:
 
 
 def extract_text_from_image(file_path: str) -> str:
-    """Extract basic image metadata and optional OCR for small images."""
+    """
+    Extract multimodal image content: Native Apple Vision OCR + Scene/Object Classification + EXIF.
+    """
     texts = []
     try:
+        from rat.crawler.apple_vision import apple_vision
+        if apple_vision.available:
+            analysis = apple_vision.analyze_image(file_path)
+            if analysis.get("combined_text"):
+                return analysis["combined_text"]
+
+        # Fallback for non-macOS or if Vision fails
         from PIL import Image
         size_bytes = os.path.getsize(file_path)
-        if size_bytes > 5 * 1024 * 1024:
-            # Skip heavy OCR for large images / RAW photos (> 5MB)
+        if size_bytes > 15 * 1024 * 1024:
             return f"Image file: {Path(file_path).name}, Size: {size_bytes} bytes"
 
         with Image.open(file_path) as img:
             texts.append(f"Image format: {img.format}, Size: {img.width}x{img.height}")
-            
-            # Optional EXIF
             try:
                 exif = img._getexif()
                 if exif:
@@ -184,8 +190,7 @@ def extract_text_from_image(file_path: str) -> str:
             except Exception:
                 pass
 
-            # Try OCR only for standard resolution images
-            if img.width <= 3000 and img.height <= 3000:
+            if img.width <= 4000 and img.height <= 4000:
                 try:
                     import pytesseract
                     ocr_text = pytesseract.image_to_string(img, timeout=2)
