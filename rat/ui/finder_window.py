@@ -120,6 +120,32 @@ class FinderSearchWorker(QThread):
         return items
 
 
+class QAWorker(QThread):
+    """Background worker for non-blocking AI document questioning."""
+    answer_ready = pyqtSignal(dict)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.file_path: str = ""
+        self.file_name: str = ""
+        self.question: str = ""
+
+    def ask(self, file_path: str, file_name: str, question: str) -> None:
+        self.file_path = file_path
+        self.file_name = file_name
+        self.question = question
+        if not self.isRunning():
+            self.start()
+
+    def run(self) -> None:
+        try:
+            content = extract_document_content(self.file_path)
+            qa_res = qa_engine.answer_question(content, self.question, file_name=self.file_name)
+            self.answer_ready.emit(qa_res)
+        except Exception as e:
+            self.answer_ready.emit({"answer": f"⚠️ Lỗi: {e}", "engine": "Error"})
+
+
 class FinderPreviewPanel(QFrame):
     """Rich Inspector Sidebar with Image Preview and In-Situ AI Chat."""
 
@@ -127,6 +153,8 @@ class FinderPreviewPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("FinderPreviewPanel")
         self.current_item: Optional[SearchResultItem] = None
+        self.qa_worker = QAWorker()
+        self.qa_worker.answer_ready.connect(self._on_qa_answer_ready)
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -298,15 +326,13 @@ class FinderPreviewPanel(QFrame):
             return
 
         self.qa_answer_view.show()
-        self.qa_answer_view.setText("⏳ <i>Đang suy luận câu trả lời...</i>")
-        try:
-            content = extract_document_content(self.current_item.file_path)
-            qa_res = qa_engine.answer_question(content, q, file_name=self.current_item.file_name)
-            ans = qa_res.get("answer", "Không có câu trả lời.")
-            engine_name = qa_res.get("engine", "AI")
-            self.qa_answer_view.setText(f"<b>{engine_name}:</b>\n{ans}")
-        except Exception as e:
-            self.qa_answer_view.setText(f"⚠️ Lỗi: {e}")
+        self.qa_answer_view.setText("⏳ <i>Đang suy luận câu trả lời bằng AI...</i>")
+        self.qa_worker.ask(self.current_item.file_path, self.current_item.file_name, q)
+
+    def _on_qa_answer_ready(self, qa_res: Dict[str, Any]) -> None:
+        ans = qa_res.get("answer", "Không có câu trả lời.")
+        engine_name = qa_res.get("engine", "AI")
+        self.qa_answer_view.setText(f"<b>{engine_name}:</b>\n{ans}")
 
 
 class FinderWindow(QMainWindow):
@@ -323,9 +349,57 @@ class FinderWindow(QMainWindow):
         self.active_collection: str = "all"
         self._init_window()
         self._init_ui()
+        self._init_shortcuts()
 
         # Warm up engine and load all files by default
         self.worker.search_query("", collection="all")
+
+    def _init_shortcuts(self) -> None:
+        """Bind native macOS keyboard shortcuts."""
+        from PyQt6.QtGui import QShortcut, QKeySequence, QGuiApplication
+        # Space to preview Quick Look
+        QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._preview_quick_look)
+        # Cmd + C to copy path
+        QShortcut(QKeySequence.StandardKey.Copy, self, self._copy_file_path)
+        # Cmd + O to open
+        QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_O), self, self._open_selected_file)
+        # Cmd + R to reveal in Finder
+        QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_R), self, self._reveal_selected_file)
+        # Cmd + F to focus search
+        QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_F), self, self._focus_search)
+        # Escape to reset search
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._clear_search)
+
+    def _preview_quick_look(self) -> None:
+        selected_rows = self.file_table.selectedItems()
+        if not selected_rows:
+            return
+        row = selected_rows[0].row()
+        if 0 <= row < len(self.current_results):
+            # macOS native Quick Look via qlmanage
+            item = self.current_results[row]
+            if platform.system() == "Darwin" and os.path.exists(item.file_path):
+                subprocess.Popen(["qlmanage", "-p", item.file_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _copy_file_path(self) -> None:
+        selected_rows = self.file_table.selectedItems()
+        if not selected_rows:
+            return
+        row = selected_rows[0].row()
+        if 0 <= row < len(self.current_results):
+            from PyQt6.QtGui import QGuiApplication
+            cb = QGuiApplication.clipboard()
+            if cb:
+                cb.setText(self.current_results[row].file_path)
+                self.status_count_label.setText(f"✓ Đã sao chép đường dẫn: {self.current_results[row].file_name}")
+
+    def _focus_search(self) -> None:
+        self.search_input.setFocus()
+        self.search_input.selectAll()
+
+    def _clear_search(self) -> None:
+        self.search_input.clear()
+        self.file_table.setFocus()
 
     def _init_window(self) -> None:
         self.setWindowTitle("rat — macOS Smart AI Finder")

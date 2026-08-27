@@ -75,10 +75,12 @@ class Database:
                 );
             """)
 
-            # Fast index on path, ext, modified_at
+            # Fast compound indexes for instantaneous collection filtering & deduplication
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_doc_ext ON documents(file_ext);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_doc_modified ON documents(modified_at);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_doc_size ON documents(file_size);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_doc_ext_mod ON documents(file_ext, modified_at DESC);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_doc_md5_size ON documents(md5_hash, file_size);")
 
             # Document Chunks table for Dense Vector search
             cursor.execute("""

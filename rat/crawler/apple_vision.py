@@ -114,6 +114,45 @@ class AppleVisionEngine:
             logger.debug(f"Apple Vision OCR failed on {image_path}: {e}")
             return ""
 
+    def recognize_text_from_bytes(self, image_bytes: bytes) -> str:
+        """
+        Extract text from raw image bytes (e.g. embedded PPTX/DOCX images) using Apple Vision OCR.
+        """
+        if not self.available or not image_bytes:
+            return ""
+
+        try:
+            request = VNRecognizeTextRequest.alloc().init()
+            request.setRecognitionLevel_(1)
+            request.setUsesLanguageCorrection_(True)
+            try:
+                request.setRecognitionLanguages_(["vi-VN", "en-US"])
+            except Exception:
+                pass
+
+            handler = VNImageRequestHandler.alloc().initWithData_options_(image_bytes, {})
+            success = handler.performRequests_error_([request], None)
+
+            if not success:
+                return ""
+
+            results = request.results()
+            if not results:
+                return ""
+
+            extracted_lines: List[str] = []
+            for observation in results:
+                candidates = observation.topCandidates_(1)
+                if candidates and len(candidates) > 0:
+                    text = str(candidates[0].string())
+                    if text and len(text.strip()) > 0:
+                        extracted_lines.append(text.strip())
+
+            return "\n".join(extracted_lines)
+        except Exception as e:
+            logger.debug(f"Apple Vision OCR on bytes failed: {e}")
+            return ""
+
     def classify_image(
         self,
         image_path: str,

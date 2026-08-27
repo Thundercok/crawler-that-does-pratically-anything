@@ -176,10 +176,44 @@ def extract_text_from_docx(file_path: str) -> str:
         return ""
 
 
+def extract_python_ast_symbols(code_text: str) -> str:
+    """Extract class names, functions, docstrings, and imports via Python AST."""
+    try:
+        import ast
+        tree = ast.parse(code_text)
+        classes = []
+        functions = []
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                classes.append(node.name)
+            elif isinstance(node, (ast.FunctionDef, getattr(ast, "AsyncFunctionDef", ()))):
+                functions.append(node.name)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports.append(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    imports.append(node.module)
+
+        parts = []
+        if classes:
+            parts.append(f"[Code Classes]: {', '.join(classes[:15])}")
+        if functions:
+            parts.append(f"[Code Functions]: {', '.join(functions[:25])}")
+        if imports:
+            parts.append(f"[Code Imports]: {', '.join(set(imports)[:20])}")
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
 def extract_text_from_pptx(file_path: str) -> str:
-    """Extract text from PowerPoint (.pptx) file using python-pptx."""
+    """Extract text and embedded slide image OCR from PowerPoint (.pptx) file using python-pptx."""
     try:
         from pptx import Presentation
+        from rat.crawler.apple_vision import apple_vision
+
         prs = Presentation(file_path)
         texts = []
         for idx, slide in enumerate(prs.slides):
@@ -187,6 +221,17 @@ def extract_text_from_pptx(file_path: str) -> str:
             for shape in slide.shapes:
                 if hasattr(shape, "text") and shape.text.strip():
                     slide_texts.append(shape.text.strip())
+                elif getattr(shape, "shape_type", None) == 13 and apple_vision.available:
+                    # Shape is an embedded picture (MSO_SHAPE_TYPE.PICTURE)
+                    try:
+                        if hasattr(shape, "image"):
+                            img_bytes = shape.image.blob
+                            ocr_text = apple_vision.recognize_text_from_bytes(img_bytes)
+                            if ocr_text and len(ocr_text.strip()) > 10:
+                                slide_texts.append(f"[Ảnh minh họa Slide - OCR]:\n{ocr_text.strip()}")
+                    except Exception:
+                        pass
+
             if slide_texts:
                 texts.append(f"--- Slide {idx + 1} ---\n" + "\n".join(slide_texts))
             if sum(len(t) for t in texts) > MAX_CHARS_PER_DOC:
@@ -239,12 +284,21 @@ def extract_text_from_csv(file_path: str) -> str:
 
 
 def extract_text_from_plaintext(file_path: str) -> str:
-    """Extract text from code, markdown, txt, json, etc."""
+    """Extract text from code, markdown, txt, json, with AST symbol parsing for code."""
     encodings = ["utf-8", "utf-8-sig", "latin-1", "cp1252", "cp1258"]
+    ext = Path(file_path).suffix.lower()
+
     for enc in encodings:
         try:
             with open(file_path, "r", encoding=enc) as f:
                 content = f.read(MAX_CHARS_PER_DOC)
+
+                # For Python code, extract AST symbols (classes, functions, imports)
+                if ext == ".py":
+                    symbols = extract_python_ast_symbols(content)
+                    if symbols:
+                        return f"{symbols}\n\n{content}"
+
                 return content
         except Exception:
             continue
