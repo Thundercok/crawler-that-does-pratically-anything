@@ -191,6 +191,18 @@ class TestRatAssistant(unittest.TestCase):
         self.assertIn("500.000.000", res["answer"])
         self.assertTrue(len(res["snippets"]) > 0)
 
+    def test_os_integration(self) -> None:
+        from rat.os.shell_integration import generate_shell_init_script
+        from rat.os.daemon import generate_plist_dict
+
+        script = generate_shell_init_script()
+        self.assertIn("function rat()", script)
+        self.assertIn("smart cd", script.lower())
+
+        plist = generate_plist_dict()
+        self.assertEqual(plist["Label"], "com.antigravity.rat.daemon")
+        self.assertTrue(plist["RunAtLoad"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,11 +7,10 @@ from __future__ import annotations
 import logging
 import sys
 
-from PyQt6.QtWidgets import QApplication
-
 from rat.cli import main as cli_main
-from rat.ui.finder_window import FinderWindow
-from rat.ui.spotlight_window import SpotlightWindow
+from rat.os.app import run_resident_app
+from rat.os.daemon import install_launch_agent, uninstall_launch_agent
+from rat.os.shell_integration import generate_shell_init_script, install_to_user_zshrc
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,42 +18,36 @@ logging.basicConfig(
 )
 
 
-def activate_macos_app() -> None:
-    """Ensure the Python GUI gains active foreground focus on macOS."""
-    try:
-        from AppKit import NSApplication, NSApplicationActivationPolicyRegular
-        ns_app = NSApplication.sharedApplication()
-        ns_app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
-        ns_app.activateIgnoringOtherApps_(True)
-    except Exception:
-        pass
-
-
-def run_gui(mode: str = "finder") -> None:
-    """Launch Finder Window (default) or Spotlight Window."""
-    activate_macos_app()
-    app = QApplication(sys.argv)
-    app.setApplicationName("rat — Smart macOS File Finder")
-
-    if mode == "spotlight":
-        window = SpotlightWindow()
-    else:
-        window = FinderWindow()
-
-    window.show()
-    window.raise_()
-    window.activateWindow()
-    activate_macos_app()
-    sys.exit(app.exec())
-
-
 def main() -> None:
-    if len(sys.argv) > 1 and sys.argv[1] in ("search", "index", "status", "ask", "dedup", "--help", "-h"):
-        cli_main()
-    elif len(sys.argv) > 1 and sys.argv[1] == "spotlight":
-        run_gui(mode="spotlight")
-    else:
-        run_gui(mode="finder")
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1]
+        if cmd in ("search", "index", "status", "ask", "dedup", "--help", "-h"):
+            cli_main()
+            return
+        elif cmd in ("init-shell", "shell"):
+            print(generate_shell_init_script())
+            return
+        elif cmd == "install-shell":
+            ok = install_to_user_zshrc()
+            print("✓ Đã cài đặt tích hợp lệnh 'rat' vào ~/.zshrc!" if ok else "⚠️ Không thể ghi vào ~/.zshrc")
+            return
+        elif cmd in ("install-daemon", "install-service"):
+            ok = install_launch_agent()
+            print("✓ Đã cài đặt LaunchAgent tự động khởi động cùng macOS!" if ok else "⚠️ Cài đặt LaunchAgent thất bại")
+            return
+        elif cmd in ("uninstall-daemon", "uninstall-service"):
+            ok = uninstall_launch_agent()
+            print("✓ Đã gỡ bỏ LaunchAgent khỏi macOS!" if ok else "⚠️ Gỡ bỏ LaunchAgent thất bại")
+            return
+        elif cmd in ("--daemon", "-d"):
+            run_resident_app(mode="daemon")
+            return
+        elif cmd == "spotlight":
+            run_resident_app(mode="spotlight")
+            return
+
+    # Default: launch resident app with full AI Finder window
+    run_resident_app(mode="finder")
 
 
 if __name__ == "__main__":
