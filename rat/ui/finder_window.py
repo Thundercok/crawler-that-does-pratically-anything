@@ -1,7 +1,7 @@
 """
-rat.ui.finder_window — Full macOS Native AI Finder Window.
-Provides a comprehensive File Manager experience with Smart Virtual Collections,
-Dual List/Grid Views, Metadata Inspector, and In-Situ AI Document Assistant.
+rat.ui.finder_window — Premium macOS Native AI Finder Window.
+Engineered with Raycast/Apple HIG design standards: Frosted Glass Sidebar,
+Apple Folded-Corner Document Icons, Non-blocking Multi-threaded Search & In-situ AI Assistant.
 """
 
 from __future__ import annotations
@@ -13,23 +13,20 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PyQt6.QtCore import QSize, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap
+from PyQt6.QtCore import QObject, QPoint, QRect, QSize, Qt, QThread, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QColor, QFont, QGuiApplication, QIcon, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
-    QMenu,
     QPushButton,
     QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -42,64 +39,83 @@ from rat.crawler.extractors import extract_document_content
 from rat.engine.hybrid_search import SearchEngine
 from rat.engine.qa_engine import qa_engine
 from rat.engine.reranker import SearchResultItem, format_file_size, format_relative_time
+from rat.ui.apple_item_delegate import AppleSpotlightDelegate
 from rat.ui.preview_panel import EXT_DESCRIPTIONS, open_file_default, reveal_in_finder
-from rat.ui.theme import get_ext_badge_info
+from rat.ui.theme import RAYCAST_QSS, get_ext_badge_info
 
 logger = logging.getLogger("rat.finder")
 
+COLLECTION_DEFINITIONS = [
+    ("all", "🌟 Tất cả tệp", []),
+    ("docs", "📄 Tài liệu văn phòng", [".docx", ".doc", ".pdf", ".txt", ".md"]),
+    ("slides", "📊 Slide thuyết trình", [".pptx", ".ppt"]),
+    ("sheets", "📈 Bảng tính & Dữ liệu", [".xlsx", ".xls", ".csv"]),
+    ("images", "🖼️ Hình ảnh & Trực quan", [".png", ".jpg", ".jpeg", ".webp", ".svg"]),
+    ("code", "💻 Mã nguồn & Kịch bản", [".py", ".js", ".ts", ".html", ".css", ".json", ".sql", ".sh", ".yaml"]),
+    ("provenance", "🌐 Tải về từ Web & Cloud", []),
+    ("recent", "🕒 Sửa đổi gần đây", []),
+]
 
-class FinderSearchWorker(QThread):
-    """Background worker for debounced search and collection querying."""
-    results_ready = pyqtSignal(dict)
+
+class AsyncSearchWorker(QObject):
+    """Long-lived non-blocking background search worker."""
+    search_finished = pyqtSignal(int, dict)
 
     def __init__(self, engine: SearchEngine) -> None:
         super().__init__()
         self.engine = engine
-        self.query_text: str = ""
-        self.collection_filter: Optional[str] = None
-
-    def search_query(self, query: str, collection: Optional[str] = None) -> None:
-        self.query_text = query
-        self.collection_filter = collection
-        if not self.isRunning():
-            self.start()
-
-    def run(self) -> None:
         try:
-            if self.collection_filter and not self.query_text.strip():
-                # Fetch collection items
-                items = self._get_collection_items(self.collection_filter)
-                self.results_ready.emit({"results": items, "count": len(items)})
-            else:
-                # Perform natural language search
-                res = self.engine.search(self.query_text, limit=40, use_hyde=False)
-                self.results_ready.emit(res)
+            self.engine.embedder.embed_query("warmup")
+            self.engine.vector_cache.preload()
         except Exception as e:
-            logger.debug(f"Finder search error: {e}")
-            self.results_ready.emit({"results": [], "error": str(e)})
+            logger.debug(f"AsyncSearchWorker warmup: {e}")
 
-    def _get_collection_items(self, collection_key: str) -> List[SearchResultItem]:
+    @pyqtSlot(int, str, str, list)
+    def execute_query(self, req_id: int, query: str, collection_key: str, extensions: list) -> None:
+        try:
+            clean_q = query.strip()
+            if not clean_q:
+                # Query default collection list from SQLite
+                results = self._fetch_collection(collection_key, extensions)
+                self.search_finished.emit(req_id, {"results": results, "query": ""})
+            else:
+                # Run hybrid search with optional extension filters
+                response = self.engine.search(
+                    clean_q,
+                    limit=45,
+                    use_hyde=False,
+                    use_vector=True,
+                )
+                raw_results = response.get("results", [])
+                if extensions:
+                    filtered = [r for r in raw_results if r.file_ext.lower() in extensions]
+                    response["results"] = filtered
+                self.search_finished.emit(req_id, response)
+        except Exception as e:
+            logger.error(f"AsyncSearchWorker error: {e}")
+            self.search_finished.emit(req_id, {"results": [], "query": query, "error": str(e)})
+
+    def _fetch_collection(self, collection_key: str, extensions: list) -> List[SearchResultItem]:
         conn = self.engine.db.get_connection()
         cursor = conn.cursor()
 
-        query_sql = "SELECT * FROM documents "
-        params = []
+        if collection_key == "provenance":
+            cursor.execute("""
+                SELECT * FROM documents
+                WHERE content_text LIKE '%[File Provenance]%'
+                ORDER BY modified_at DESC LIMIT 60
+            """)
+        elif extensions:
+            placeholders = ",".join(["?"] * len(extensions))
+            cursor.execute(f"""
+                SELECT * FROM documents
+                WHERE file_ext IN ({placeholders})
+                ORDER BY modified_at DESC LIMIT 60
+            """, extensions)
+        else:
+            cursor.execute("SELECT * FROM documents ORDER BY modified_at DESC LIMIT 60")
 
-        if collection_key == "docs":
-            query_sql += "WHERE file_ext IN ('.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.txt', '.md') "
-        elif collection_key == "images":
-            query_sql += "WHERE file_ext IN ('.png', '.jpg', '.jpeg', '.webp', '.svg') "
-        elif collection_key == "code":
-            query_sql += "WHERE file_ext IN ('.py', '.js', '.ts', '.html', '.css', '.json', '.sql', '.sh', '.yaml') "
-        elif collection_key == "provenance":
-            query_sql += "WHERE content_text LIKE '%[File Provenance]%' "
-        elif collection_key == "recent":
-            pass  # Just order by modified_at desc
-
-        query_sql += "ORDER BY modified_at DESC LIMIT 60"
-        cursor.execute(query_sql, params)
         rows = [dict(r) for r in cursor.fetchall()]
-
         items = []
         for r in rows:
             desc = EXT_DESCRIPTIONS.get(r["file_ext"].lower(), f"Tệp {r['file_ext'].upper()}")
@@ -120,92 +136,88 @@ class FinderSearchWorker(QThread):
         return items
 
 
-class QAWorker(QThread):
-    """Background worker for non-blocking AI document questioning."""
-    answer_ready = pyqtSignal(dict)
+class AsyncQAWorker(QObject):
+    """Background worker for non-blocking in-situ AI Document Q&A."""
+    qa_finished = pyqtSignal(dict)
 
-    def __init__(self) -> None:
-        super().__init__()
-        self.file_path: str = ""
-        self.file_name: str = ""
-        self.question: str = ""
-
-    def ask(self, file_path: str, file_name: str, question: str) -> None:
-        self.file_path = file_path
-        self.file_name = file_name
-        self.question = question
-        if not self.isRunning():
-            self.start()
-
-    def run(self) -> None:
+    @pyqtSlot(str, str, str)
+    def ask_document(self, file_path: str, file_name: str, question: str) -> None:
         try:
-            content = extract_document_content(self.file_path)
-            qa_res = qa_engine.answer_question(content, self.question, file_name=self.file_name)
-            self.answer_ready.emit(qa_res)
+            content = extract_document_content(file_path)
+            qa_res = qa_engine.answer_question(content, question, file_name=file_name)
+            self.qa_finished.emit(qa_res)
         except Exception as e:
-            self.answer_ready.emit({"answer": f"⚠️ Lỗi: {e}", "engine": "Error"})
+            self.qa_finished.emit({"answer": f"⚠️ Lỗi xử lý: {e}", "engine": "Error"})
 
 
-class FinderPreviewPanel(QFrame):
-    """Rich Inspector Sidebar with Image Preview and In-Situ AI Chat."""
+class ModernFinderPreview(QFrame):
+    """Refined Apple HIG Inspector Panel with Image QuickLook and AI Chat."""
+    ask_requested = pyqtSignal(str, str, str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setObjectName("FinderPreviewPanel")
+        self.setObjectName("FinderPreview")
         self.current_item: Optional[SearchResultItem] = None
-        self.qa_worker = QAWorker()
-        self.qa_worker.answer_ready.connect(self._on_qa_answer_ready)
         self._init_ui()
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
-        # Header Info
-        header_row = QHBoxLayout()
+        # Header Info Card
+        header_frame = QFrame()
+        header_frame.setStyleSheet("background-color: #f2f2f7; border-radius: 10px; padding: 10px;")
+        h_layout = QHBoxLayout(header_frame)
+        h_layout.setContentsMargins(4, 4, 4, 4)
+        h_layout.setSpacing(12)
+
         self.badge_label = QLabel("FILE")
-        self.badge_label.setFixedSize(38, 38)
+        self.badge_label.setFixedSize(42, 42)
         self.badge_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.badge_label.setStyleSheet("background-color: #007aff; color: white; font-weight: bold; border-radius: 8px;")
+        self.badge_label.setStyleSheet("background-color: #007aff; color: #ffffff; font-weight: 700; font-size: 11px; border-radius: 8px;")
 
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
         self.name_label = QLabel("Chọn một tệp tin")
         self.name_label.setStyleSheet("color: #1c1c1e; font-size: 14px; font-weight: 600;")
         self.name_label.setWordWrap(True)
+
         self.meta_sub_label = QLabel("")
-        self.meta_sub_label.setStyleSheet("color: #636366; font-size: 11px;")
+        self.meta_sub_label.setStyleSheet("color: #636366; font-size: 11.5px;")
         title_col.addWidget(self.name_label)
         title_col.addWidget(self.meta_sub_label)
 
-        header_row.addWidget(self.badge_label)
-        header_row.addLayout(title_col, 1)
-        layout.addLayout(header_row)
+        h_layout.addWidget(self.badge_label)
+        h_layout.addLayout(title_col, 1)
+        layout.addWidget(header_frame)
 
-        # Image Thumbnail Preview (if image)
-        self.image_preview_label = QLabel()
-        self.image_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_preview_label.setStyleSheet("background-color: #f2f2f7; border-radius: 8px; border: 1px solid #e5e5ea; padding: 4px;")
-        self.image_preview_label.setFixedHeight(140)
-        self.image_preview_label.hide()
-        layout.addWidget(self.image_preview_label)
+        # Image Thumbnail View
+        self.image_preview_box = QLabel()
+        self.image_preview_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_preview_box.setFixedHeight(150)
+        self.image_preview_box.setStyleSheet("background-color: #ffffff; border: 1px solid #d1d1d6; border-radius: 10px; padding: 4px;")
+        self.image_preview_box.hide()
+        layout.addWidget(self.image_preview_box)
 
-        # AI Context Explanation
+        # AI Reason Badge Card
         self.reason_card = QFrame()
-        self.reason_card.setStyleSheet("background-color: #e0f2fe; border-radius: 6px; padding: 6px; border: 1px solid #7dd3fc;")
+        self.reason_card.setStyleSheet("background-color: #e0f2fe; border-radius: 8px; padding: 8px; border: 1px solid #7dd3fc;")
         r_layout = QVBoxLayout(self.reason_card)
         r_layout.setContentsMargins(4, 4, 4, 4)
+        self.reason_title = QLabel("💡 Khớp ngữ cảnh AI:")
+        self.reason_title.setStyleSheet("color: #0284c7; font-size: 11px; font-weight: 700;")
         self.reason_text = QLabel("")
-        self.reason_text.setStyleSheet("color: #0369a1; font-size: 11px; font-weight: 500;")
+        self.reason_text.setStyleSheet("color: #0369a1; font-size: 12px; font-weight: 500;")
         self.reason_text.setWordWrap(True)
+        r_layout.addWidget(self.reason_title)
         r_layout.addWidget(self.reason_text)
         layout.addWidget(self.reason_card)
 
-        # Quick Look Text
-        ql_title = QLabel("📄 Nội dung trích đoạn:")
-        ql_title.setStyleSheet("color: #636366; font-size: 11px; font-weight: 600;")
-        layout.addWidget(ql_title)
+        # Text Quick Look
+        ql_label = QLabel("📄 Xem trước nội dung:")
+        ql_label.setStyleSheet("color: #636366; font-size: 11px; font-weight: 600;")
+        layout.addWidget(ql_label)
 
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
@@ -214,200 +226,192 @@ class FinderPreviewPanel(QFrame):
                 background-color: #ffffff;
                 color: #1c1c1e;
                 border: 1px solid #e5e5ea;
-                border-radius: 6px;
-                font-family: -apple-system, sans-serif;
-                font-size: 11px;
-                line-height: 1.4;
-                padding: 6px;
+                border-radius: 8px;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                font-size: 11.5px;
+                line-height: 1.45;
+                padding: 8px;
             }
         """)
         layout.addWidget(self.preview_text, 1)
 
-        # In-Situ AI Ask Section
-        ask_card = QFrame()
-        ask_card.setStyleSheet("background-color: #f8fafc; border-radius: 8px; border: 1px solid #cbd5e1; padding: 6px;")
-        ask_layout = QVBoxLayout(ask_card)
-        ask_layout.setContentsMargins(6, 6, 6, 6)
-        ask_layout.setSpacing(6)
+        # In-Situ AI Chat Section
+        chat_card = QFrame()
+        chat_card.setStyleSheet("background-color: #f8fafc; border-radius: 10px; border: 1px solid #cbd5e1; padding: 8px;")
+        c_layout = QVBoxLayout(chat_card)
+        c_layout.setContentsMargins(6, 6, 6, 6)
+        c_layout.setSpacing(6)
 
-        ask_header = QLabel("🧠 Trợ lý AI Hỏi - Đáp trực tiếp:")
-        ask_header.setStyleSheet("color: #0f172a; font-size: 11px; font-weight: 600;")
-        ask_layout.addWidget(ask_header)
+        c_header = QLabel("🧠 Trợ lý AI Hỏi - Đáp trực tiếp:")
+        c_header.setStyleSheet("color: #0f172a; font-size: 11.5px; font-weight: 700;")
+        c_layout.addWidget(c_header)
 
-        ask_input_row = QHBoxLayout()
+        input_row = QHBoxLayout()
+        input_row.setSpacing(6)
         self.ask_input = QLineEdit()
-        self.ask_input.setPlaceholderText("Hỏi gì đó về file này... (nhấn Enter)")
+        self.ask_input.setPlaceholderText("Hỏi gì đó về file này... (Nhấn Enter)")
         self.ask_input.setStyleSheet("""
             QLineEdit {
                 background-color: #ffffff;
-                border: 1px solid #94a3b8;
+                border: 1.5px solid #cbd5e1;
                 border-radius: 6px;
-                padding: 5px 8px;
-                font-size: 11px;
+                padding: 6px 10px;
+                font-size: 11.5px;
             }
             QLineEdit:focus {
-                border: 1px solid #007aff;
+                border: 1.5px solid #007aff;
             }
         """)
-        self.ask_input.returnPressed.connect(self._handle_ask_question)
+        self.ask_input.returnPressed.connect(self._trigger_ask)
 
-        self.ask_btn = QPushButton("Hỏi")
+        self.ask_btn = QPushButton("Hỏi AI")
         self.ask_btn.setStyleSheet("""
             QPushButton {
                 background-color: #007aff;
-                color: white;
+                color: #ffffff;
                 font-weight: 600;
+                font-size: 11.5px;
                 border-radius: 6px;
-                padding: 5px 10px;
-                font-size: 11px;
+                padding: 6px 12px;
+                border: none;
             }
             QPushButton:hover {
                 background-color: #0056b3;
             }
         """)
-        self.ask_btn.clicked.connect(self._handle_ask_question)
-        ask_input_row.addWidget(self.ask_input, 1)
-        ask_input_row.addWidget(self.ask_btn)
-        ask_layout.addLayout(ask_input_row)
+        self.ask_btn.clicked.connect(self._trigger_ask)
+        input_row.addWidget(self.ask_input, 1)
+        input_row.addWidget(self.ask_btn)
+        c_layout.addLayout(input_row)
 
-        self.qa_answer_view = QLabel("")
-        self.qa_answer_view.setStyleSheet("color: #1e293b; font-size: 11px; line-height: 1.3;")
-        self.qa_answer_view.setWordWrap(True)
-        self.qa_answer_view.hide()
-        ask_layout.addWidget(self.qa_answer_view)
+        self.qa_response_box = QLabel("")
+        self.qa_response_box.setStyleSheet("""
+            background-color: #ffffff;
+            color: #1e293b;
+            font-size: 11.5px;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            line-height: 1.4;
+        """)
+        self.qa_response_box.setWordWrap(True)
+        self.qa_response_box.hide()
+        c_layout.addWidget(self.qa_response_box)
 
-        layout.addWidget(ask_card)
+        layout.addWidget(chat_card)
 
     def set_item(self, item: Optional[SearchResultItem]) -> None:
         self.current_item = item
-        self.qa_answer_view.hide()
-        self.qa_answer_view.setText("")
+        self.qa_response_box.hide()
+        self.qa_response_box.setText("")
         self.ask_input.clear()
 
         if not item:
+            self.badge_label.setText("FILE")
+            self.badge_label.setStyleSheet("background-color: #e5e5ea; color: #636366; font-weight: 700; border-radius: 8px;")
             self.name_label.setText("Chọn một tệp tin")
             self.meta_sub_label.setText("")
-            self.image_preview_label.hide()
+            self.image_preview_box.hide()
             self.reason_card.hide()
             self.preview_text.setPlainText("")
             return
 
         info = get_ext_badge_info(item.file_ext)
         self.badge_label.setText(info["label"])
-        self.badge_label.setStyleSheet(f"background-color: {info['bg']}; color: {info['fg']}; font-weight: bold; border-radius: 8px;")
+        self.badge_label.setStyleSheet(f"background-color: {info['bg']}; color: {info['fg']}; font-weight: 700; font-size: 11px; border-radius: 8px;")
         self.name_label.setText(item.file_name)
-        self.meta_sub_label.setText(f"{item.file_size_formatted} • {item.modified_formatted}")
+        self.meta_sub_label.setText(f"{item.file_size_formatted} • Sửa {item.modified_formatted}")
 
-        # Image thumbnail preview
+        # Image Thumbnail
         ext = item.file_ext.lower()
         if ext in [".png", ".jpg", ".jpeg", ".webp"] and os.path.exists(item.file_path):
-            pixmap = QPixmap(item.file_path)
-            if not pixmap.isNull():
-                scaled = pixmap.scaled(280, 130, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                self.image_preview_label.setPixmap(scaled)
-                self.image_preview_label.show()
+            pix = QPixmap(item.file_path)
+            if not pix.isNull():
+                scaled = pix.scaled(280, 140, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.image_preview_box.setPixmap(scaled)
+                self.image_preview_box.show()
             else:
-                self.image_preview_label.hide()
+                self.image_preview_box.hide()
         else:
-            self.image_preview_label.hide()
+            self.image_preview_box.hide()
 
-        # Reason card
+        # Reason badge
         if item.explanation:
             self.reason_card.show()
-            self.reason_text.setText(f"💡 {item.explanation}")
+            self.reason_text.setText(item.explanation)
         else:
             self.reason_card.hide()
 
+        # Preview content
         self.preview_text.setPlainText(item.snippet or "(Không có đoạn trích nội dung)")
 
-    def _handle_ask_question(self) -> None:
+    def _trigger_ask(self) -> None:
         q = self.ask_input.text().strip()
         if not q or not self.current_item:
             return
 
-        self.qa_answer_view.show()
-        self.qa_answer_view.setText("⏳ <i>Đang suy luận câu trả lời bằng AI...</i>")
-        self.qa_worker.ask(self.current_item.file_path, self.current_item.file_name, q)
+        self.qa_response_box.show()
+        self.qa_response_box.setText("⏳ <i>Đang phân tích tài liệu và suy luận...</i>")
+        self.ask_requested.emit(self.current_item.file_path, self.current_item.file_name, q)
 
-    def _on_qa_answer_ready(self, qa_res: Dict[str, Any]) -> None:
-        ans = qa_res.get("answer", "Không có câu trả lời.")
-        engine_name = qa_res.get("engine", "AI")
-        self.qa_answer_view.setText(f"<b>{engine_name}:</b>\n{ans}")
+    def set_qa_answer(self, result: Dict[str, Any]) -> None:
+        ans = result.get("answer", "Không có câu trả lời.")
+        engine = result.get("engine", "AI")
+        self.qa_response_box.show()
+        self.qa_response_box.setText(f"<b>💡 {engine}:</b>\n{ans}")
 
 
 class FinderWindow(QMainWindow):
-    """Full-featured macOS AI Finder Application Window."""
+    """Complete, responsive, and gorgeous macOS AI Finder Application Window."""
+    search_requested = pyqtSignal(int, str, str, list)
+    ask_requested = pyqtSignal(str, str, str)
 
     def __init__(self) -> None:
         super().__init__()
         self.db = Database(config.db_path)
-        self.search_engine = SearchEngine(self.db)
-        self.worker = FinderSearchWorker(self.search_engine)
-        self.worker.results_ready.connect(self._on_search_results)
-
+        self.engine = SearchEngine(self.db)
+        self.active_collection_idx = 0
+        self._request_id = 0
         self.current_results: List[SearchResultItem] = []
-        self.active_collection: str = "all"
+
+        # Search debounce timer
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(90)
+        self.search_timer.timeout.connect(self._dispatch_search)
+
+        self._init_threads()
         self._init_window()
         self._init_ui()
         self._init_shortcuts()
 
-        # Warm up engine and load all files by default
-        self.worker.search_query("", collection="all")
+        # Initial load
+        self._dispatch_search()
 
-    def _init_shortcuts(self) -> None:
-        """Bind native macOS keyboard shortcuts."""
-        from PyQt6.QtGui import QShortcut, QKeySequence, QGuiApplication
-        # Space to preview Quick Look
-        QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._preview_quick_look)
-        # Cmd + C to copy path
-        QShortcut(QKeySequence.StandardKey.Copy, self, self._copy_file_path)
-        # Cmd + O to open
-        QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_O), self, self._open_selected_file)
-        # Cmd + R to reveal in Finder
-        QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_R), self, self._reveal_selected_file)
-        # Cmd + F to focus search
-        QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_F), self, self._focus_search)
-        # Escape to reset search
-        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._clear_search)
+    def _init_threads(self) -> None:
+        # Search Thread
+        self.search_thread = QThread(self)
+        self.search_worker = AsyncSearchWorker(self.engine)
+        self.search_worker.moveToThread(self.search_thread)
+        self.search_requested.connect(self.search_worker.execute_query)
+        self.search_worker.search_finished.connect(self._on_search_finished)
+        self.search_thread.start()
 
-    def _preview_quick_look(self) -> None:
-        selected_rows = self.file_table.selectedItems()
-        if not selected_rows:
-            return
-        row = selected_rows[0].row()
-        if 0 <= row < len(self.current_results):
-            # macOS native Quick Look via qlmanage
-            item = self.current_results[row]
-            if platform.system() == "Darwin" and os.path.exists(item.file_path):
-                subprocess.Popen(["qlmanage", "-p", item.file_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    def _copy_file_path(self) -> None:
-        selected_rows = self.file_table.selectedItems()
-        if not selected_rows:
-            return
-        row = selected_rows[0].row()
-        if 0 <= row < len(self.current_results):
-            from PyQt6.QtGui import QGuiApplication
-            cb = QGuiApplication.clipboard()
-            if cb:
-                cb.setText(self.current_results[row].file_path)
-                self.status_count_label.setText(f"✓ Đã sao chép đường dẫn: {self.current_results[row].file_name}")
-
-    def _focus_search(self) -> None:
-        self.search_input.setFocus()
-        self.search_input.selectAll()
-
-    def _clear_search(self) -> None:
-        self.search_input.clear()
-        self.file_table.setFocus()
+        # QA Thread
+        self.qa_thread = QThread(self)
+        self.qa_worker = AsyncQAWorker()
+        self.qa_worker.moveToThread(self.qa_thread)
+        self.ask_requested.connect(self.qa_worker.ask_document)
+        self.qa_worker.qa_finished.connect(self._on_qa_finished)
+        self.qa_thread.start()
 
     def _init_window(self) -> None:
         self.setWindowTitle("rat — macOS Smart AI Finder")
-        self.resize(1120, 720)
-        self.setMinimumSize(880, 560)
+        self.resize(1140, 720)
+        self.setMinimumSize(920, 580)
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #ececec;
+                background-color: #f2f2f7;
             }
             QSplitter::handle {
                 background-color: #d1d1d6;
@@ -419,16 +423,16 @@ class FinderWindow(QMainWindow):
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         main_splitter.setHandleWidth(1)
 
-        # 1. Left macOS Sidebar
+        # 1. Left Sidebar
         sidebar_frame = QFrame()
-        sidebar_frame.setFixedWidth(220)
+        sidebar_frame.setFixedWidth(230)
         sidebar_frame.setStyleSheet("background-color: #e5e5ea; border-right: 1px solid #d1d1d6;")
         sidebar_layout = QVBoxLayout(sidebar_frame)
-        sidebar_layout.setContentsMargins(10, 14, 10, 14)
+        sidebar_layout.setContentsMargins(10, 16, 10, 16)
         sidebar_layout.setSpacing(4)
 
         sb_header = QLabel("THƯ MỤC THÔNG MINH")
-        sb_header.setStyleSheet("color: #8e8e93; font-size: 10px; font-weight: 700; padding-left: 8px; margin-bottom: 2px;")
+        sb_header.setStyleSheet("color: #8e8e93; font-size: 10.5px; font-weight: 700; padding-left: 8px; margin-bottom: 4px;")
         sidebar_layout.addWidget(sb_header)
 
         self.sidebar_list = QListWidget()
@@ -439,10 +443,10 @@ class FinderWindow(QMainWindow):
                 outline: none;
             }
             QListWidget::item {
-                padding: 7px 10px;
-                border-radius: 6px;
+                padding: 8px 10px;
+                border-radius: 8px;
                 color: #1c1c1e;
-                font-size: 12px;
+                font-size: 12.5px;
                 font-weight: 500;
             }
             QListWidget::item:selected {
@@ -455,56 +459,47 @@ class FinderWindow(QMainWindow):
             }
         """)
 
-        collections = [
-            ("🌟 Tất cả tệp (All Files)", "all"),
-            ("📄 Tài liệu văn phòng", "docs"),
-            ("🖼️ Hình ảnh & Trực quan", "images"),
-            ("💻 Mã nguồn dự án", "code"),
-            ("🌐 Tải từ Web (Provenance)", "provenance"),
-            ("🕒 Sửa đổi gần đây", "recent"),
-        ]
-
-        for label, key in collections:
+        for key, label, _ in COLLECTION_DEFINITIONS:
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, key)
             self.sidebar_list.addItem(item)
 
         self.sidebar_list.setCurrentRow(0)
-        self.sidebar_list.itemClicked.connect(self._on_sidebar_item_clicked)
+        self.sidebar_list.currentRowChanged.connect(self._on_sidebar_changed)
         sidebar_layout.addWidget(self.sidebar_list, 1)
 
-        # Quick Watched Folders Section
+        # Watched folders info
         wf_header = QLabel("VỊ TRÍ THEO DÕI")
-        wf_header.setStyleSheet("color: #8e8e93; font-size: 10px; font-weight: 700; padding-left: 8px; margin-top: 10px;")
+        wf_header.setStyleSheet("color: #8e8e93; font-size: 10.5px; font-weight: 700; padding-left: 8px; margin-top: 12px;")
         sidebar_layout.addWidget(wf_header)
 
-        watched_label = QLabel(f"• Downloads\n• Documents\n• Desktop")
-        watched_label.setStyleSheet("color: #48484a; font-size: 11.5px; padding-left: 10px; line-height: 1.5;")
-        sidebar_layout.addWidget(watched_label)
+        watched_box = QLabel("• ~/Downloads\n• ~/Documents\n• ~/Desktop")
+        watched_box.setStyleSheet("color: #48484a; font-size: 11.5px; padding-left: 10px; line-height: 1.5;")
+        sidebar_layout.addWidget(watched_box)
 
         main_splitter.addWidget(sidebar_frame)
 
-        # 2. Center Content Area (Toolbar + File Table)
+        # 2. Center Panel (Toolbar + Results List)
         center_frame = QFrame()
         center_frame.setStyleSheet("background-color: #ffffff;")
         center_layout = QVBoxLayout(center_frame)
-        center_layout.setContentsMargins(14, 12, 14, 12)
+        center_layout.setContentsMargins(16, 14, 16, 14)
         center_layout.setSpacing(10)
 
-        # Top Toolbar
-        toolbar_row = QHBoxLayout()
-        toolbar_row.setSpacing(10)
+        # Top Search Bar Row
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Tìm kiếm ngữ cảnh: 'slide nami', 'báo cáo tháng 7', 'ảnh screenshot'...")
+        self.search_input.setPlaceholderText("🔍 Tìm kiếm tự nhiên: 'slide nami', 'báo cáo tài chính', 'ảnh biểu đồ'...")
         self.search_input.setStyleSheet("""
             QLineEdit {
                 background-color: #f2f2f7;
                 color: #1c1c1e;
+                font-size: 13.5px;
                 border: 1px solid #d1d1d6;
                 border-radius: 8px;
-                padding: 7px 12px;
-                font-size: 13px;
+                padding: 8px 12px;
             }
             QLineEdit:focus {
                 background-color: #ffffff;
@@ -512,78 +507,58 @@ class FinderWindow(QMainWindow):
             }
         """)
         self.search_input.textChanged.connect(self._on_search_text_changed)
-        toolbar_row.addWidget(self.search_input, 1)
+        search_row.addWidget(self.search_input, 1)
 
-        # Action Buttons
-        self.btn_open = QPushButton("Mở tệp")
-        self.btn_open.setStyleSheet("background-color: #007aff; color: white; font-weight: 600; border-radius: 6px; padding: 6px 12px;")
-        self.btn_open.clicked.connect(self._open_selected_file)
-        toolbar_row.addWidget(self.btn_open)
+        btn_open = QPushButton("Mở")
+        btn_open.setStyleSheet("background-color: #007aff; color: #ffffff; font-weight: 600; border-radius: 6px; padding: 7px 14px; font-size: 12px;")
+        btn_open.clicked.connect(self._open_selected_file)
+        search_row.addWidget(btn_open)
 
-        self.btn_reveal = QPushButton("Finder")
-        self.btn_reveal.setStyleSheet("background-color: #f2f2f7; color: #1c1c1e; border: 1px solid #d1d1d6; border-radius: 6px; padding: 6px 12px;")
-        self.btn_reveal.clicked.connect(self._reveal_selected_file)
-        toolbar_row.addWidget(self.btn_reveal)
+        btn_reveal = QPushButton("Finder")
+        btn_reveal.setStyleSheet("background-color: #f2f2f7; color: #1c1c1e; border: 1px solid #d1d1d6; border-radius: 6px; padding: 7px 12px; font-size: 12px;")
+        btn_reveal.clicked.connect(self._reveal_selected_file)
+        search_row.addWidget(btn_reveal)
 
-        center_layout.addLayout(toolbar_row)
+        center_layout.addLayout(search_row)
 
-        # Status row
+        # Status Bar
         status_row = QHBoxLayout()
-        self.status_count_label = QLabel("Đang tải dữ liệu...")
-        self.status_count_label.setStyleSheet("color: #8e8e93; font-size: 11px;")
-        status_row.addWidget(self.status_count_label)
+        self.status_label = QLabel("Đang tải dữ liệu...")
+        self.status_label.setStyleSheet("color: #8e8e93; font-size: 11px;")
+        status_row.addWidget(self.status_label)
         status_row.addStretch()
         center_layout.addLayout(status_row)
 
-        # Main Table Widget (Finder List Mode)
-        self.file_table = QTableWidget()
-        self.file_table.setColumnCount(4)
-        self.file_table.setHorizontalHeaderLabels(["Tên tệp tin", "Sửa đổi lần cuối", "Kích thước", "Khớp ngữ cảnh AI"])
-        self.file_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.file_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.file_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.file_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.file_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.file_table.setShowGrid(False)
-        self.file_table.setStyleSheet("""
-            QTableWidget {
-                border: 1px solid #e5e5ea;
-                border-radius: 8px;
-                gridline-color: transparent;
-                font-size: 12px;
+        # Beautiful Custom Rendered Results List
+        self.results_list = QListWidget()
+        self.results_list.setItemDelegate(AppleSpotlightDelegate(self.results_list))
+        self.results_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.results_list.setStyleSheet("""
+            QListWidget {
                 background-color: #ffffff;
+                border: 1px solid #e5e5ea;
+                border-radius: 10px;
+                outline: none;
             }
-            QTableWidget::item {
-                padding: 6px 8px;
+            QListWidget::item {
                 border-bottom: 1px solid #f2f2f7;
             }
-            QTableWidget::item:selected {
+            QListWidget::item:selected {
                 background-color: #e5f1fb;
-                color: #007aff;
-                font-weight: 500;
-            }
-            QHeaderView::section {
-                background-color: #f8fafc;
-                color: #64748b;
-                font-weight: 600;
-                font-size: 11px;
-                border: none;
-                border-bottom: 1px solid #e2e8f0;
-                padding: 6px;
+                border-radius: 8px;
             }
         """)
-        self.file_table.itemSelectionChanged.connect(self._on_table_selection_changed)
-        self.file_table.itemDoubleClicked.connect(self._open_selected_file)
-        center_layout.addWidget(self.file_table, 1)
+        self.results_list.currentRowChanged.connect(self._on_list_row_changed)
+        self.results_list.itemDoubleClicked.connect(self._open_selected_file)
+        center_layout.addWidget(self.results_list, 1)
 
         main_splitter.addWidget(center_frame)
 
         # 3. Right Inspector Panel
-        self.preview_panel = FinderPreviewPanel()
-        self.preview_panel.setFixedWidth(320)
+        self.preview_panel = ModernFinderPreview()
+        self.preview_panel.setFixedWidth(340)
         self.preview_panel.setStyleSheet("background-color: #f8fafc; border-left: 1px solid #d1d1d6;")
+        self.preview_panel.ask_requested.connect(self._on_ask_requested)
         main_splitter.addWidget(self.preview_panel)
 
         main_splitter.setStretchFactor(0, 0)
@@ -592,81 +567,111 @@ class FinderWindow(QMainWindow):
 
         self.setCentralWidget(main_splitter)
 
-    def _on_sidebar_item_clicked(self, item: QListWidgetItem) -> None:
-        key = item.data(Qt.ItemDataRole.UserRole)
-        self.active_collection = key
-        self.search_input.clear()
-        self.worker.search_query("", collection=key)
+    def _init_shortcuts(self) -> None:
+        """Bind native macOS shortcuts."""
+        # Space -> Quick Look
+        QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._preview_quick_look)
+        # Cmd + C -> Copy Path
+        QShortcut(QKeySequence.StandardKey.Copy, self, self._copy_file_path)
+        # Cmd + O -> Open File
+        QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_O), self, self._open_selected_file)
+        # Cmd + R -> Reveal in Finder
+        QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_R), self, self._reveal_selected_file)
+        # Cmd + F -> Focus search
+        QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_F), self, self._focus_search)
+        # Escape -> Reset search
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._clear_search)
+
+    def _on_sidebar_changed(self, row: int) -> None:
+        if 0 <= row < len(COLLECTION_DEFINITIONS):
+            self.active_collection_idx = row
+            self.search_input.clear()
+            self._dispatch_search()
 
     def _on_search_text_changed(self, text: str) -> None:
-        q = text.strip()
-        if q:
-            self.worker.search_query(q, collection=None)
-        else:
-            self.worker.search_query("", collection=self.active_collection)
+        self.search_timer.start()
 
-    def _on_search_results(self, response: Dict[str, Any]) -> None:
-        results = response.get("results", [])
+    def _dispatch_search(self) -> None:
+        self._request_id += 1
+        query = self.search_input.text()
+        col_key, _, exts = COLLECTION_DEFINITIONS[self.active_collection_idx]
+        self.status_label.setText("⚡ Đang tìm kiếm...")
+        self.search_requested.emit(self._request_id, query, col_key, exts)
+
+    @pyqtSlot(int, dict)
+    def _on_search_finished(self, req_id: int, response: Dict[str, Any]) -> None:
+        if req_id != self._request_id:
+            return  # Discard outdated request
+
+        results: List[SearchResultItem] = response.get("results", [])
         self.current_results = results
-        self.status_count_label.setText(f"Hiển thị {len(results)} tệp tin phù hợp")
+        self.status_label.setText(f"Hiển thị {len(results)} tệp tin phù hợp")
 
-        self.file_table.setRowCount(len(results))
-        for row_idx, item in enumerate(results):
-            # Name
-            name_item = QTableWidgetItem(f"📄 {item.file_name}")
-            name_item.setData(Qt.ItemDataRole.UserRole, item)
-            self.file_table.setItem(row_idx, 0, name_item)
-
-            # Modified
-            mod_item = QTableWidgetItem(item.modified_formatted)
-            mod_item.setForeground(QColor("#636366"))
-            self.file_table.setItem(row_idx, 1, mod_item)
-
-            # Size
-            size_item = QTableWidgetItem(item.file_size_formatted)
-            size_item.setForeground(QColor("#636366"))
-            self.file_table.setItem(row_idx, 2, size_item)
-
-            # Reason / Version
-            expl = item.explanation or "Tệp tin"
-            reason_item = QTableWidgetItem(expl[:45] + ("..." if len(expl) > 45 else ""))
-            reason_item.setForeground(QColor("#0284c7"))
-            self.file_table.setItem(row_idx, 3, reason_item)
+        self.results_list.clear()
+        for item in results:
+            list_item = QListWidgetItem()
+            list_item.setSizeHint(QSize(self.results_list.width(), 58))
+            list_item.setData(Qt.ItemDataRole.UserRole, item)
+            self.results_list.addItem(list_item)
 
         if results:
-            self.file_table.selectRow(0)
+            self.results_list.setCurrentRow(0)
         else:
             self.preview_panel.set_item(None)
 
-    def _on_table_selection_changed(self) -> None:
-        selected_rows = self.file_table.selectedItems()
-        if not selected_rows:
-            return
-        row = selected_rows[0].row()
+    def _on_list_row_changed(self, row: int) -> None:
         if 0 <= row < len(self.current_results):
             self.preview_panel.set_item(self.current_results[row])
 
+    def _on_ask_requested(self, file_path: str, file_name: str, question: str) -> None:
+        self.ask_requested.emit(file_path, file_name, question)
+
+    @pyqtSlot(dict)
+    def _on_qa_finished(self, qa_res: Dict[str, Any]) -> None:
+        self.preview_panel.set_qa_answer(qa_res)
+
     def _open_selected_file(self) -> None:
-        selected_rows = self.file_table.selectedItems()
-        if not selected_rows:
-            return
-        row = selected_rows[0].row()
+        row = self.results_list.currentRow()
         if 0 <= row < len(self.current_results):
             open_file_default(self.current_results[row].file_path)
 
     def _reveal_selected_file(self) -> None:
-        selected_rows = self.file_table.selectedItems()
-        if not selected_rows:
-            return
-        row = selected_rows[0].row()
+        row = self.results_list.currentRow()
         if 0 <= row < len(self.current_results):
             reveal_in_finder(self.current_results[row].file_path)
+
+    def _preview_quick_look(self) -> None:
+        row = self.results_list.currentRow()
+        if 0 <= row < len(self.current_results):
+            item = self.current_results[row]
+            if platform.system() == "Darwin" and os.path.exists(item.file_path):
+                subprocess.Popen(["qlmanage", "-p", item.file_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _copy_file_path(self) -> None:
+        row = self.results_list.currentRow()
+        if 0 <= row < len(self.current_results):
+            cb = QGuiApplication.clipboard()
+            if cb:
+                cb.setText(self.current_results[row].file_path)
+                self.status_label.setText(f"✓ Đã sao chép: {self.current_results[row].file_name}")
+
+    def _focus_search(self) -> None:
+        self.search_input.setFocus()
+        self.search_input.selectAll()
+
+    def _clear_search(self) -> None:
+        self.search_input.clear()
+        self.results_list.setFocus()
+
+    def closeEvent(self, event: Any) -> None:
+        self.search_thread.quit()
+        self.qa_thread.quit()
+        event.accept()
 
 
 def run_finder() -> None:
     """Run standalone Finder window."""
     import sys
-    from PyQt6.QtWidgets import QApplication
     app = QApplication(sys.argv)
     window = FinderWindow()
     window.show()
