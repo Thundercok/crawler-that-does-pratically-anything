@@ -45,34 +45,34 @@ def get_ext_badge_info(ext: str) -> dict:
 
 
 RAYCAST_QSS = """
-/* 100% Genuine Apple macOS Light Theme */
+/* SOTA Apple macOS Sequoia & Raycast Design System */
 * {
-    font-family: ".AppleSystemUIFont", "Helvetica Neue", "Arial";
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", "Arial", sans-serif;
     outline: none;
 }
 
-/* Spotlight Window Container (Frosted White Glass) */
+/* Spotlight Window Container (Frosted Glass Acrylic Container) */
 QFrame#SpotlightContainer {
     background-color: #ffffff;
-    border: 1px solid #d1d1d6;
+    border: 1px solid #cbd5e1;
     border-radius: 16px;
 }
 
 /* Search Header */
 QFrame#SearchHeader {
     background-color: #fbfbfd;
-    border-bottom: 1px solid #e5e5ea;
+    border-bottom: 1px solid #e2e8f0;
     border-top-left-radius: 16px;
     border-top-right-radius: 16px;
-    padding: 12px 16px 10px 16px;
+    padding: 14px 18px 11px 18px;
 }
 
 QLineEdit#SearchInput {
     background-color: #ffffff;
-    color: #1c1c1e;
+    color: #0f172a;
     font-size: 17px;
     font-weight: 400;
-    border: 1px solid #d1d1d6;
+    border: 1px solid #cbd5e1;
     border-radius: 10px;
     padding: 10px 14px;
     selection-background-color: #007aff;
@@ -84,31 +84,32 @@ QLineEdit#SearchInput:focus {
     background-color: #ffffff;
 }
 
-/* Scope Bar (Segmented Pills) */
+/* Scope Bar (Segmented Micro-Pills) */
 QFrame#FilterPillsBar {
     background-color: transparent;
     padding: 2px 0px 0px 0px;
 }
 
 QPushButton.FilterPill {
-    background-color: #e5e5ea;
-    color: #48484a;
-    font-size: 12px;
+    background-color: #f1f5f9;
+    color: #475569;
+    font-size: 11.5px;
     font-weight: 500;
-    padding: 5px 12px;
+    padding: 4px 11px;
     border-radius: 6px;
-    border: none;
+    border: 1px solid #e2e8f0;
 }
 
 QPushButton.FilterPill:hover {
-    background-color: #d1d1d6;
-    color: #1c1c1e;
+    background-color: #e2e8f0;
+    color: #0f172a;
 }
 
 QPushButton.FilterPill[active="true"] {
     background-color: #007aff;
     color: #ffffff;
     font-weight: 600;
+    border: 1px solid #0062cc;
 }
 
 /* Result List */
@@ -128,57 +129,59 @@ QListWidget#ResultList::item {
 }
 
 QListWidget#ResultList::item:hover {
-    background-color: #f2f2f7;
+    background-color: #f8fafc;
 }
 
 QListWidget#ResultList::item:selected {
-    background-color: #e8edf7;
-    border: 1px solid #007aff;
+    background-color: #eff6ff;
+    border: 1px solid #38bdf8;
 }
 
 /* Inspector / Quick Look Panel */
 QFrame#PreviewPanel {
     background-color: #fbfbfd;
-    border-left: 1px solid #e5e5ea;
+    border-left: 1px solid #e2e8f0;
     border-bottom-right-radius: 16px;
-    padding: 16px 20px;
+    padding: 14px 16px;
 }
 
 QTextEdit#PreviewContent {
     background-color: #ffffff;
-    color: #1c1c1e;
-    border: 1px solid #e5e5ea;
+    color: #0f172a;
+    border: 1px solid #e2e8f0;
     border-radius: 8px;
     font-size: 12px;
-    padding: 12px;
-    font-family: "Menlo", monospace;
+    padding: 10px;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Mono", "Menlo", monospace;
     line-height: 1.55;
 }
 
-/* Action Footer */
+/* Raycast Action Footer with Keycap Badges */
 QFrame#ActionFooter {
-    background-color: #f5f5f7;
-    border-top: 1px solid #e5e5ea;
+    background-color: #f8fafc;
+    border-top: 1px solid #e2e8f0;
     border-bottom-left-radius: 16px;
     border-bottom-right-radius: 16px;
     padding: 8px 18px;
 }
 
 QLabel#FooterStatus {
-    color: #636366;
-    font-size: 12px;
-    font-weight: 400;
+    color: #475569;
+    font-size: 11.5px;
+    font-weight: 500;
 }
 
+/* SOTA Keycaps with 3D physical feel */
 QLabel.HotkeyBadge {
-    background-color: #ffffff;
-    color: #1c1c1e;
-    border: 1px solid #d1d1d6;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f1f5f9);
+    color: #334155;
+    border: 1px solid #cbd5e1;
+    border-bottom: 2px solid #94a3b8;
     border-radius: 4px;
     padding: 2px 6px;
-    font-size: 10px;
+    font-size: 10.5px;
     font-weight: 600;
-    font-family: "Menlo", monospace;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Menlo", monospace;
 }
 
 /* Minimalist macOS Light Scrollbars */
@@ -190,13 +193,13 @@ QScrollBar:vertical {
 }
 
 QScrollBar::handle:vertical {
-    background: rgba(0, 0, 0, 0.2);
+    background: rgba(0, 0, 0, 0.18);
     min-height: 25px;
     border-radius: 3px;
 }
 
 QScrollBar::handle:vertical:hover {
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(0, 0, 0, 0.35);
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {

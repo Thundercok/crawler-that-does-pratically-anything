@@ -41,7 +41,7 @@ from rat.engine.hybrid_search import SearchEngine
 from rat.engine.qa_engine import qa_engine
 from rat.engine.reranker import SearchResultItem, format_file_size, format_relative_time, sort_search_results
 from rat.ui.apple_item_delegate import AppleSpotlightDelegate
-from rat.ui.preview_panel import EXT_DESCRIPTIONS, open_file_default, reveal_in_finder
+from rat.ui.preview_panel import EXT_DESCRIPTIONS, PreviewPanel, open_file_default, reveal_in_finder
 from rat.ui.theme import RAYCAST_QSS, get_ext_badge_info
 
 logger = logging.getLogger("rat.finder")
@@ -636,10 +636,10 @@ class FinderWindow(QMainWindow):
 
         main_splitter.addWidget(center_frame)
 
-        # 3. Right Inspector Panel
-        self.preview_panel = ModernFinderPreview()
-        self.preview_panel.setFixedWidth(340)
-        self.preview_panel.setStyleSheet("background-color: #f8fafc; border-left: 1px solid #d1d1d6;")
+        # 3. Right SOTA Inspector Panel
+        self.preview_panel = PreviewPanel()
+        self.preview_panel.setFixedWidth(350)
+        self.preview_panel.setStyleSheet("background-color: #fbfbfd; border-left: 1px solid #e2e8f0;")
         self.preview_panel.ask_requested.connect(self._on_ask_requested)
         main_splitter.addWidget(self.preview_panel)
 
@@ -647,7 +647,51 @@ class FinderWindow(QMainWindow):
         main_splitter.setStretchFactor(1, 1)
         main_splitter.setStretchFactor(2, 0)
 
-        self.setCentralWidget(main_splitter)
+        # Root container with SOTA Raycast Action Footer
+        root_widget = QWidget()
+        root_layout = QVBoxLayout(root_widget)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
+        root_layout.addWidget(main_splitter, 1)
+
+        # Bottom SOTA Action Footer
+        footer = QFrame()
+        footer.setObjectName("ActionFooter")
+        footer.setStyleSheet("""
+            QFrame#ActionFooter {
+                background-color: #f8fafc;
+                border-top: 1px solid #e2e8f0;
+                padding: 6px 14px;
+            }
+        """)
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(14, 5, 14, 5)
+        footer_layout.setSpacing(10)
+
+        self.footer_live_lbl = QLabel("🟢 Sẵn sàng")
+        self.footer_live_lbl.setStyleSheet("color: #475569; font-size: 11px; font-weight: 500;")
+        footer_layout.addWidget(self.footer_live_lbl)
+        footer_layout.addStretch()
+
+        hotkeys = [
+            ("Space", "Xem nhanh"),
+            ("↵", "Mở"),
+            ("⌘↵", "Finder"),
+            ("⌘C", "Copy"),
+            ("⌘F", "Tìm"),
+            ("⌥⇧Space", "Spotlight"),
+        ]
+        for key, desc in hotkeys:
+            badge = QLabel(key)
+            badge.setProperty("class", "HotkeyBadge")
+            desc_label = QLabel(desc)
+            desc_label.setStyleSheet("color: #64748b; font-size: 10.5px; margin-right: 4px;")
+            footer_layout.addWidget(badge)
+            footer_layout.addWidget(desc_label)
+
+        root_layout.addWidget(footer)
+        self.setCentralWidget(root_widget)
 
     def _init_shortcuts(self) -> None:
         """Bind native macOS shortcuts."""
@@ -715,8 +759,10 @@ class FinderWindow(QMainWindow):
         if trace and trace.steps:
             conf_pct = int(trace.final_confidence * 100)
             self.status_label.setText(f"Hiển thị {len(results)} tệp  •  🧠 CoT: {conf_pct}% ({trace.total_latency_ms}ms)")
+            self.footer_live_lbl.setText(f"🟢 {len(results)} tệp  •  ⚡ {response.get('latency_ms', 0)}ms  •  🧠 CoT {conf_pct}%")
         else:
             self.status_label.setText(f"Hiển thị {len(results)} tệp tin")
+            self.footer_live_lbl.setText(f"🟢 {len(results)} tệp  •  ⚡ {response.get('latency_ms', 0)}ms")
 
         self.preview_panel.set_reasoning_trace(trace, plan)
         self._populate_results_list()
