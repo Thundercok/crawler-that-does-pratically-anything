@@ -159,6 +159,8 @@ class ModernFinderPreview(QFrame):
         super().__init__(parent)
         self.setObjectName("FinderPreview")
         self.current_item: Optional[SearchResultItem] = None
+        self.current_trace: Optional[Any] = None
+        self.current_plan: Optional[Dict[str, Any]] = None
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -215,10 +217,33 @@ class ModernFinderPreview(QFrame):
         r_layout.addWidget(self.reason_text)
         layout.addWidget(self.reason_card)
 
-        # Text Quick Look
+        # Text Quick Look Row with Minimalist CoT button
+        ql_row = QHBoxLayout()
+        ql_row.setSpacing(6)
         ql_label = QLabel("📄 Xem trước nội dung:")
         ql_label.setStyleSheet("color: #636366; font-size: 11px; font-weight: 600;")
-        layout.addWidget(ql_label)
+        ql_row.addWidget(ql_label)
+        ql_row.addStretch()
+
+        self.cot_badge_btn = QPushButton("🧠 Suy luận CoT")
+        self.cot_badge_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f1f5f9;
+                color: #0284c7;
+                font-size: 11px;
+                font-weight: 600;
+                border: 1px solid #cbd5e1;
+                border-radius: 4px;
+                padding: 2px 8px;
+            }
+            QPushButton:hover {
+                background-color: #e0f2fe;
+            }
+        """)
+        self.cot_badge_btn.clicked.connect(self._toggle_cot_trace)
+        self.cot_badge_btn.hide()
+        ql_row.addWidget(self.cot_badge_btn)
+        layout.addLayout(ql_row)
 
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
@@ -360,6 +385,31 @@ class ModernFinderPreview(QFrame):
         engine = result.get("engine", "AI")
         self.qa_response_box.show()
         self.qa_response_box.setText(f"<b>💡 {engine}:</b>\n{ans}")
+
+    def _toggle_cot_trace(self) -> None:
+        if not self.current_trace:
+            return
+        if self.preview_text.toPlainText().startswith("### 🧠 FR-CoT"):
+            if self.current_item:
+                self.preview_text.setPlainText(self.current_item.snippet or "(Không có đoạn trích nội dung)")
+            conf_pct = int(self.current_trace.final_confidence * 100)
+            status_tag = "Đủ" if self.current_trace.is_sufficient else "Phần nào"
+            self.cot_badge_btn.setText(f"🧠 CoT: {conf_pct}% ({status_tag})")
+        else:
+            self.preview_text.setPlainText(self.current_trace.render_markdown())
+            self.cot_badge_btn.setText("📄 Xem lại tệp")
+
+    def set_reasoning_trace(self, trace: Optional[Any], plan: Optional[Dict[str, Any]] = None) -> None:
+        self.current_trace = trace
+        self.current_plan = plan
+        if trace and hasattr(trace, "steps") and trace.steps:
+            conf_pct = int(trace.final_confidence * 100)
+            status_tag = "Đủ" if trace.is_sufficient else "Phần nào"
+            self.cot_badge_btn.setText(f"🧠 CoT: {conf_pct}% ({status_tag})")
+            self.cot_badge_btn.show()
+        else:
+            self.cot_badge_btn.hide()
+
 
 
 class FinderWindow(QMainWindow):
