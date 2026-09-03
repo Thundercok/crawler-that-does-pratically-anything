@@ -284,12 +284,17 @@ class SpotlightWindow(QMainWindow):
             list_item.setData(Qt.ItemDataRole.UserRole, item)
             self.result_list.addItem(list_item)
 
+        trace = response.get("reasoning_trace")
+        plan = response.get("plan")
+        self.preview_panel.set_reasoning_trace(trace, plan)
+
+        cot_badge = f"  •  🧠 CoT {int(trace.final_confidence*100)}%" if trace and trace.steps else ""
         if results:
             self.result_list.setCurrentRow(0)
-            self.footer_status.setText(f"{len(results)} kết quả ({latency}ms)")
+            self.footer_status.setText(f"{len(results)} kết quả ({latency}ms){cot_badge}")
         else:
             self.preview_panel.set_item(None)
-            self.footer_status.setText(f"Không có kết quả ({latency}ms)")
+            self.footer_status.setText(f"Không có kết quả ({latency}ms){cot_badge}")
 
     def _on_result_selected(self, row: int) -> None:
         item = self.result_list.item(row)

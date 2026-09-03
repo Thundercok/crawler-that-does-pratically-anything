@@ -659,7 +659,16 @@ class FinderWindow(QMainWindow):
 
         results: List[SearchResultItem] = response.get("results", [])
         self.current_results = results
-        self.status_label.setText(f"Hiển thị {len(results)} tệp tin")
+
+        trace = response.get("reasoning_trace")
+        plan = response.get("plan")
+        if trace and trace.steps:
+            conf_pct = int(trace.final_confidence * 100)
+            self.status_label.setText(f"Hiển thị {len(results)} tệp  •  🧠 CoT: {conf_pct}% ({trace.total_latency_ms}ms)")
+        else:
+            self.status_label.setText(f"Hiển thị {len(results)} tệp tin")
+
+        self.preview_panel.set_reasoning_trace(trace, plan)
         self._populate_results_list()
 
     def _on_list_row_changed(self, row: int) -> None:
