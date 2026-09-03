@@ -38,7 +38,7 @@ STOPWORDS: Set[str] = {
 # Type mappings
 TYPE_PATTERNS: Dict[str, List[str]] = {
     # Word
-    r"\b(word|docx?|van ban|soan thao|bai tap)\b": [".docx", ".doc"],
+    r"\b(word|docx?|van ban|soan thao)\b": [".docx", ".doc"],
     # PDF
     r"\b(pdf|scan|sach|giao trinh|ebook)\b": [".pdf"],
     # Excel / Spreadsheet
@@ -57,7 +57,7 @@ TYPE_PATTERNS: Dict[str, List[str]] = {
 
 
 class ParsedContext:
-    """Represents the structured interpretation of a messy natural language query."""
+    """Represents the structured interpretation of a messy natural language query across OS facets."""
 
     def __init__(
         self,
@@ -70,6 +70,9 @@ class ParsedContext:
         date_max: Optional[float] = None,
         time_desc: Optional[str] = None,
         file_type_desc: Optional[str] = None,
+        source_app: Optional[str] = None,
+        source_domain: Optional[str] = None,
+        visual_concepts: Optional[List[str]] = None,
     ) -> None:
         self.raw_query = raw_query
         self.keywords = keywords
@@ -80,6 +83,9 @@ class ParsedContext:
         self.date_max = date_max
         self.time_desc = time_desc
         self.file_type_desc = file_type_desc
+        self.source_app = source_app
+        self.source_domain = source_domain
+        self.visual_concepts = visual_concepts or []
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -92,6 +98,9 @@ class ParsedContext:
             "date_max": self.date_max,
             "time_desc": self.time_desc,
             "file_type_desc": self.file_type_desc,
+            "source_app": self.source_app,
+            "source_domain": self.source_domain,
+            "visual_concepts": self.visual_concepts,
         }
 
 
@@ -218,6 +227,89 @@ class ContextParser:
 
         return excluded_exts, excluded_kw
 
+    @staticmethod
+    def parse_provenance_context(query: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Detect OS provenance cues such as downloading application or source website.
+        Returns: (source_app, source_domain)
+        """
+        q_norm = remove_accents(query)
+
+        app_map = {
+            r"\b(telegram)\b": "Telegram",
+            r"\b(safari)\b": "Safari",
+            r"\b(chrome|google chrome)\b": "Google Chrome",
+            r"\b(slack)\b": "Slack",
+            r"\b(discord)\b": "Discord",
+            r"\b(zalo)\b": "Zalo",
+            r"\b(mail|outlook|email)\b": "Mail",
+            r"\b(messages|imessage)\b": "Messages",
+        }
+
+        domain_map = {
+            r"\b(overleaf(\.com)?)\b": "overleaf.com",
+            r"\b(github(\.com)?)\b": "github.com",
+            r"\b(google drive|gg drive|drive\.google\.com)\b": "drive.google.com",
+            r"\b(google docs|gg docs|docs\.google\.com)\b": "docs.google.com",
+            r"\b(kaggle(\.com)?)\b": "kaggle.com",
+            r"\b(dropbox(\.com)?)\b": "dropbox.com",
+            r"\b(notion(\.so)?)\b": "notion.so",
+        }
+
+        # Check for trigger phrases: "từ X", "tải từ X", "download từ X", "qua X", "gửi qua X"
+        prov_trigger = re.search(r"\b(tu|tai tu|download tu|qua|gui qua|nguon|from|via)\s+([\w\.\-]+)", q_norm)
+        detected_app: Optional[str] = None
+        detected_domain: Optional[str] = None
+
+        for pattern, app_name in app_map.items():
+            if re.search(pattern, q_norm):
+                detected_app = app_name
+                break
+
+        for pattern, domain_name in domain_map.items():
+            if re.search(pattern, q_norm):
+                detected_domain = domain_name
+                break
+
+        # Fallback if specific domain mentioned directly after trigger
+        if not detected_domain and prov_trigger:
+            candidate = prov_trigger.group(2).lower()
+            if candidate in ["overleaf", "github", "kaggle", "notion", "dropbox"]:
+                detected_domain = f"{candidate}.com" if candidate != "notion" else "notion.so"
+
+        return detected_app, detected_domain
+
+    @staticmethod
+    def parse_visual_context(query: str) -> Tuple[List[str], Optional[str]]:
+        """
+        Detect visual attributes, scene objects, and visual document types.
+        Returns: (visual_concepts, description)
+        """
+        q_norm = remove_accents(query)
+        concepts: List[str] = []
+
+        visual_categories = {
+            "receipt": [r"\b(hoa don|bien lai|receipt|invoice|bill)\b", "hóa đơn, biên lai"],
+            "stamp": [r"\b(chu ky|dau moc|con dau|dong moc|signature|stamp)\b", "chữ ký, con dấu"],
+            "chart": [r"\b(bieu do|do thi|chart|diagram|graph)\b", "biểu đồ, đồ thị"],
+            "screenshot": [r"\b(chup man hinh|screenshot|cap man hinh)\b", "ảnh chụp màn hình"],
+            "sunset": [r"\b(hoang hon|sunset|chieu ta|binh minh|sunrise)\b", "hoàng hôn, bình minh"],
+            "beach": [r"\b(bai bien|bien|beach|ocean|cat trang)\b", "bãi biển, đại dương"],
+            "pet": [r"\b(cho|meo|dog|cat|thu cung|pet|cun con|meo con)\b", "chó, mèo, thú cưng"],
+            "vehicle": [r"\b(xe hoi|o to|car|xe may|motorcycle|oto)\b", "xe cộ, ô tô"],
+            "food": [r"\b(mon an|food|do an|do uong|drink|nha hang)\b", "món ăn, ẩm thực"],
+            "people": [r"\b(chan dung|nguoi|portrait|selfie|khuon mat)\b", "chân dung, người"],
+        }
+
+        desc_list: List[str] = []
+        for cat_key, (pat, desc) in visual_categories.items():
+            if re.search(pat, q_norm):
+                concepts.append(cat_key)
+                desc_list.append(desc)
+
+        desc_str = ", ".join(desc_list) if desc_list else None
+        return concepts, desc_str
+
     @classmethod
     def parse_query(cls, raw_query: str) -> ParsedContext:
         """Parse natural language query into structured context constraints & keywords."""
@@ -228,6 +320,8 @@ class ContextParser:
         date_min, date_max, time_desc = cls.parse_temporal_context(cleaned_raw)
         extensions, type_desc = cls.parse_file_types(cleaned_raw)
         excluded_extensions, excluded_keywords = cls.parse_exclusions(cleaned_raw)
+        source_app, source_domain = cls.parse_provenance_context(cleaned_raw)
+        visual_concepts, _ = cls.parse_visual_context(cleaned_raw)
 
         # If an extension is in excluded_extensions, remove it from extensions
         if excluded_extensions and extensions:
@@ -270,4 +364,7 @@ class ContextParser:
             date_max=date_max,
             time_desc=time_desc,
             file_type_desc=type_desc,
+            source_app=source_app,
+            source_domain=source_domain,
+            visual_concepts=visual_concepts,
         )

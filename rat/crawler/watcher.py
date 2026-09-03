@@ -115,3 +115,7 @@ class FolderWatcher:
         self.observer.stop()
         self.observer.join(timeout=2.0)
         self.is_running = False
+
+
+# Alias for backward compatibility
+Watcher = FolderWatcher

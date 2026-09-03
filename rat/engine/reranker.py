@@ -238,6 +238,35 @@ class Reranker:
             elif days_old < 14:
                 score += 4.0
 
+        # 6. Provenance match bonus
+        source_app = getattr(context, "source_app", None)
+        source_dom = getattr(context, "source_domain", None)
+        if source_app or source_dom:
+            content_lower = content_sample.lower()
+            if source_app and source_app.lower() in content_lower:
+                score += 30.0
+                reasons.append(f"Nguồn gốc từ ứng dụng {source_app}")
+            elif source_dom and source_dom.lower() in content_lower:
+                score += 25.0
+                reasons.append(f"Nguồn tải từ {source_dom}")
+
+        # 7. Visual Taxonomy & OCR match bonus
+        visual_concepts = getattr(context, "visual_concepts", []) or []
+        if visual_concepts:
+            content_lower = content_sample.lower()
+            matched_visual = [v for v in visual_concepts if v.lower() in content_lower]
+            if matched_visual:
+                score += 25.0
+                reasons.append(f"Khớp nhãn thị giác [{', '.join(matched_visual)}]")
+
+        # 8. Multi-Facet Convergence Bonus
+        matched_facets = doc.get("matched_facets", [])
+        if len(matched_facets) >= 3:
+            score += 15.0
+            reasons.append(f"Hội tụ đa tầng ({len(matched_facets)} chiều: {', '.join(matched_facets)})")
+        elif len(matched_facets) == 2:
+            score += 8.0
+
         # Clamp score to 0..100
         final_score = max(5.0, min(100.0, score))
         return final_score, reasons
@@ -248,7 +277,8 @@ class Reranker:
         context: ParsedContext,
         candidates: List[Dict[str, Any]],
         top_k: int = 15,
-        use_llm: bool = False
+        use_llm: bool = False,
+        trace: Optional[Any] = None,
     ) -> List[SearchResultItem]:
         """
         Score, filter, and format candidate search results.
@@ -311,3 +341,56 @@ class Reranker:
             results.append(item)
 
         return results
+
+
+def natural_sort_key(text: str) -> List[Any]:
+    """
+    Split text into digit and non-digit chunks, lowercasing text.
+    Ensures natural sort order (file1, file2, file10) and case-insensitivity ('in hoa or not').
+    """
+    return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", text or "")]
+
+
+def sort_search_results(items: List[SearchResultItem], sort_mode: str = "abc") -> List[SearchResultItem]:
+    """
+    Sort search results according to user criteria:
+    - 'abc': Natural alphabetical (A-Z, case-insensitive / in hoa or not), tie-breaker by most recent time (-modified_at)
+    - 'recent': Most recent modified time first (modified_at DESC), tie-breaker by natural alphabetical (A-Z)
+    - 'score': Relevance match score DESC, tie-breaker by most recent time (-modified_at)
+    - 'size': File size DESC, tie-breaker by natural alphabetical (A-Z)
+    """
+    if sort_mode == "abc":
+        return sorted(
+            items,
+            key=lambda x: (
+                natural_sort_key(getattr(x, "file_name", "") or ""),
+                -getattr(x, "modified_at", 0.0),
+            )
+        )
+    elif sort_mode == "recent":
+        return sorted(
+            items,
+            key=lambda x: (
+                -getattr(x, "modified_at", 0.0),
+                natural_sort_key(getattr(x, "file_name", "") or ""),
+            )
+        )
+    elif sort_mode == "score":
+        return sorted(
+            items,
+            key=lambda x: (
+                -getattr(x, "score", 0.0),
+                -getattr(x, "modified_at", 0.0),
+                natural_sort_key(getattr(x, "file_name", "") or ""),
+            )
+        )
+    elif sort_mode == "size":
+        return sorted(
+            items,
+            key=lambda x: (
+                -getattr(x, "file_size", 0),
+                natural_sort_key(getattr(x, "file_name", "") or ""),
+            )
+        )
+    return items
+

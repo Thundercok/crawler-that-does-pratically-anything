@@ -538,4 +538,116 @@ class Database:
                 conn.commit()
         return deleted_count
 
+    def search_by_provenance(
+        self,
+        source_app: Optional[str] = None,
+        source_domain: Optional[str] = None,
+        extensions: Optional[List[str]] = None,
+        date_min: Optional[float] = None,
+        date_max: Optional[float] = None,
+        limit: int = 40
+    ) -> List[Dict[str, Any]]:
+        """Search documents matching OS provenance metadata (Safari, Chrome, Telegram, domain)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        clauses = []
+        params: List[Any] = []
+
+        if source_app:
+            clauses.append("d.content_text LIKE ?")
+            params.append(f"%{source_app}%")
+
+        if source_domain:
+            clauses.append("d.content_text LIKE ?")
+            params.append(f"%{source_domain}%")
+
+        if not clauses:
+            return []
+
+        if extensions:
+            ext_placeholders = ",".join(["?"] * len(extensions))
+            clauses.append(f"d.file_ext IN ({ext_placeholders})")
+            params.extend([e.lower() for e in extensions])
+
+        if date_min is not None:
+            clauses.append("d.modified_at >= ?")
+            params.append(date_min)
+
+        if date_max is not None:
+            clauses.append("d.modified_at <= ?")
+            params.append(date_max)
+
+        where_sql = "WHERE " + " AND ".join(clauses)
+        sql = f"""
+            SELECT d.id, d.file_path, d.file_name, d.file_ext, d.file_size,
+                   d.created_at, d.modified_at, d.content_text, d.summary,
+                   -50.0 as rank
+            FROM documents d
+            {where_sql}
+            ORDER BY d.modified_at DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        try:
+            cursor.execute(sql, params)
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.debug(f"search_by_provenance error: {e}")
+            return []
+
+    def search_by_vision_tags(
+        self,
+        tags: List[str],
+        extensions: Optional[List[str]] = None,
+        date_min: Optional[float] = None,
+        date_max: Optional[float] = None,
+        limit: int = 40
+    ) -> List[Dict[str, Any]]:
+        """Search documents matching Apple Vision OCR & image classification taxonomy tags."""
+        if not tags:
+            return []
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        clauses = []
+        params: List[Any] = []
+
+        tag_clauses = []
+        for t in tags:
+            tag_clauses.append("d.content_text LIKE ?")
+            params.append(f"%{t}%")
+
+        clauses.append(f"({' OR '.join(tag_clauses)})")
+
+        if extensions:
+            ext_placeholders = ",".join(["?"] * len(extensions))
+            clauses.append(f"d.file_ext IN ({ext_placeholders})")
+            params.extend([e.lower() for e in extensions])
+
+        if date_min is not None:
+            clauses.append("d.modified_at >= ?")
+            params.append(date_min)
+
+        if date_max is not None:
+            clauses.append("d.modified_at <= ?")
+            params.append(date_max)
+
+        where_sql = "WHERE " + " AND ".join(clauses)
+        sql = f"""
+            SELECT d.id, d.file_path, d.file_name, d.file_ext, d.file_size,
+                   d.created_at, d.modified_at, d.content_text, d.summary,
+                   -40.0 as rank
+            FROM documents d
+            {where_sql}
+            ORDER BY d.modified_at DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        try:
+            cursor.execute(sql, params)
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.debug(f"search_by_vision_tags error: {e}")
+            return []
+
 

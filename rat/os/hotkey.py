@@ -34,8 +34,9 @@ class GlobalHotkeyManager:
                 if self.on_trigger:
                     self.on_trigger()
 
-            # Listen for Option+Space (<alt>+<space>) and Cmd+Shift+Space (<cmd>+<shift>+<space>)
+            # Listen for Control+Space (<ctrl>+<space>) as requested, plus Cmd+Shift+Space and Option+Space as fallbacks
             hotkeys = {
+                "<ctrl>+<space>": _handle_activate,
                 "<alt>+<space>": _handle_activate,
                 "<cmd>+<shift>+<space>": _handle_activate,
             }
@@ -43,7 +44,7 @@ class GlobalHotkeyManager:
             self._listener = keyboard.GlobalHotKeys(hotkeys)
             self._listener.start()
             self._running = True
-            logger.info("Global Hotkey Manager started successfully (<alt>+<space>).")
+            logger.info("Global Hotkey Manager started successfully (<ctrl>+<space>).")
             return True
         except Exception as e:
             logger.warning(f"Failed to start GlobalHotKeys listener: {e}")

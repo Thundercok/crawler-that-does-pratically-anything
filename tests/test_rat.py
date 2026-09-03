@@ -203,6 +203,146 @@ class TestRatAssistant(unittest.TestCase):
         self.assertEqual(plist["Label"], "com.antigravity.rat.daemon")
         self.assertTrue(plist["RunAtLoad"])
 
+    def test_semantic_chunker(self) -> None:
+        from rat.crawler.chunker import SemanticChunker
+
+        chunker = SemanticChunker(chunk_size=10, chunk_overlap=2)
+        # Empty text
+        self.assertEqual(chunker.chunk_text(""), [])
+        self.assertEqual(chunker.chunk_text("   "), [])
+
+        # Short text within single chunk limit
+        single = chunker.chunk_text("Hello world testing small document")
+        self.assertEqual(len(single), 1)
+        self.assertEqual(single[0].chunk_index, 0)
+
+        # Longer text split by words and boundary markers
+        text = (
+            "Một hai ba bốn năm sáu bảy tám chín mười mười một mười hai.\n"
+            "--- Page 2 ---\n"
+            "Mười ba mười bốn mười lăm mười sáu mười bảy mười tám mười chín hai mươi."
+        )
+        chunks = chunker.chunk_text(text)
+        self.assertTrue(len(chunks) >= 2)
+        self.assertEqual(chunks[0].chunk_index, 0)
+        self.assertEqual(chunks[1].chunk_index, 1)
+
+    def test_context_engine_ontology(self) -> None:
+        from rat.engine.context_engine import ContextEngine
+
+        # Test DSA query
+        enriched_dsa = ContextEngine.enrich_query("bài tập dsa cây nhị phân")
+        self.assertIn("dsa_academic", enriched_dsa.matched_concepts)
+        self.assertIn(".py", enriched_dsa.recommended_extensions)
+        self.assertIn(".cpp", enriched_dsa.recommended_extensions)
+        self.assertIn("cây", enriched_dsa.expanded_keywords)
+
+        # Test Finance query
+        enriched_fin = ContextEngine.enrich_query("bảng tính tiền cơm trưa")
+        self.assertIn("finance_expenses", enriched_fin.matched_concepts)
+        self.assertIn(".xlsx", enriched_fin.recommended_extensions)
+
+    def test_file_extractors(self) -> None:
+        # Create temporary text file
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("Dòng 1: Thử nghiệm trích xuất tệp tin văn bản.\nDòng 2: Nội dung kiểm thử.")
+            tmp_path = f.name
+
+        try:
+            content = extract_document_content(tmp_path)
+            self.assertIn("Thử nghiệm trích xuất", content)
+            self.assertTrue(len(content) > 0)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    def test_vector_cache_operations(self) -> None:
+        import numpy as np
+        from rat.engine.vector_cache import VectorCache
+
+        cache = VectorCache(self.db)
+        cache.preload()
+
+        # Search with zero vector or empty cache
+        empty_res = cache.search(np.zeros(384, dtype=np.float32))
+        self.assertIsInstance(empty_res, list)
+
+    def test_natural_alphabetical_and_recency_sorting(self) -> None:
+        from rat.engine.reranker import SearchResultItem, sort_search_results
+
+        items = [
+            SearchResultItem(
+                file_path="/tmp/file10.txt",
+                file_name="file10.txt",
+                file_ext=".txt",
+                file_size=100,
+                modified_at=1000.0,
+                score=50.0,
+                explanation="",
+                snippet="",
+            ),
+            SearchResultItem(
+                file_path="/tmp/File1.txt",
+                file_name="File1.txt",
+                file_ext=".txt",
+                file_size=200,
+                modified_at=2000.0,
+                score=60.0,
+                explanation="",
+                snippet="",
+            ),
+            SearchResultItem(
+                file_path="/tmp/file2.txt",
+                file_name="file2.txt",
+                file_ext=".txt",
+                file_size=50,
+                modified_at=3000.0,
+                score=70.0,
+                explanation="",
+                snippet="",
+            ),
+            SearchResultItem(
+                file_path="/tmp/B_file.txt",
+                file_name="B_file.txt",
+                file_ext=".txt",
+                file_size=300,
+                modified_at=4000.0,
+                score=80.0,
+                explanation="",
+                snippet="",
+            ),
+            SearchResultItem(
+                file_path="/tmp/a_file.txt",
+                file_name="a_file.txt",
+                file_ext=".txt",
+                file_size=400,
+                modified_at=5000.0,
+                score=90.0,
+                explanation="",
+                snippet="",
+            ),
+        ]
+
+        # 1. Test Natural Alphabetical Sort (A-Z, case-insensitive / in hoa or not)
+        sorted_abc = sort_search_results(items, sort_mode="abc")
+        names_abc = [it.file_name for it in sorted_abc]
+        # a_file.txt should come before B_file.txt (a then b, case-insensitive)
+        self.assertEqual(names_abc[0], "a_file.txt")
+        self.assertEqual(names_abc[1], "B_file.txt")
+        # File1.txt, file2.txt, file10.txt in natural order
+        self.assertEqual(names_abc[2], "File1.txt")
+        self.assertEqual(names_abc[3], "file2.txt")
+        self.assertEqual(names_abc[4], "file10.txt")
+
+        # 2. Test Most Recent Sort (thời gian gần nhất)
+        sorted_recent = sort_search_results(items, sort_mode="recent")
+        names_recent = [it.file_name for it in sorted_recent]
+        self.assertEqual(names_recent[0], "a_file.txt")  # modified_at 5000.0
+        self.assertEqual(names_recent[1], "B_file.txt")  # modified_at 4000.0
+        self.assertEqual(names_recent[2], "file2.txt")   # modified_at 3000.0
+
 
 if __name__ == "__main__":
     unittest.main()
+

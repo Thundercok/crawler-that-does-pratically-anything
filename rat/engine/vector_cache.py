@@ -137,6 +137,53 @@ class VectorCache:
             results.sort(key=lambda x: x["similarity_score"], reverse=True)
             return results[:limit]
 
+    def append_vectors(self, new_records: List[Dict[str, Any]], embeddings: np.ndarray) -> None:
+        """
+        Dynamically append newly indexed chunks and embeddings to RAM matrix without full reload.
+        Solves vector cache staleness when watcher or indexer adds files.
+        """
+        if not new_records or embeddings is None or len(embeddings) == 0:
+            return
+
+        with self._lock:
+            # If not yet loaded, preload handles it
+            if not self._is_loaded:
+                self.preload()
+                return
+
+            # Ensure 2D float32 array
+            if len(embeddings.shape) == 1:
+                embeddings = embeddings.reshape(1, -1)
+            embeddings = embeddings.astype(np.float32)
+
+            if self._matrix.size == 0:
+                self._matrix = embeddings
+                self._records = list(new_records)
+            else:
+                self._matrix = np.vstack([self._matrix, embeddings])
+                self._records.extend(new_records)
+
+            logger.debug(f"VectorCache dynamically appended {len(new_records)} chunks. Total: {len(self._records)}")
+
+    def remove_by_path(self, file_path: str) -> None:
+        """Remove file records and vectors from in-memory cache upon file deletion."""
+        with self._lock:
+            if not self._is_loaded or len(self._records) == 0:
+                return
+
+            keep_indices = [i for i, r in enumerate(self._records) if r["file_path"] != file_path]
+            if len(keep_indices) == len(self._records):
+                return
+
+            if not keep_indices:
+                self._matrix = np.empty((0, 384), dtype=np.float32)
+                self._records = []
+            else:
+                self._matrix = self._matrix[keep_indices]
+                self._records = [self._records[i] for i in keep_indices]
+
+            logger.debug(f"VectorCache removed {file_path}. Remaining chunks: {len(self._records)}")
+
 
 # Global singleton instance
 vector_cache = VectorCache()

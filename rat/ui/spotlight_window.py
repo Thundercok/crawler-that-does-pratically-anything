@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
 from rat.config import config
 from rat.crawler.db import Database
 from rat.engine.hybrid_search import SearchEngine
-from rat.engine.reranker import SearchResultItem
+from rat.engine.reranker import SearchResultItem, sort_search_results
 from rat.ui.action_menu import ActionMenuDialog
 from rat.ui.apple_item_delegate import AppleSpotlightDelegate
 from rat.ui.preview_panel import PreviewPanel, open_file_default, reveal_in_finder
@@ -273,6 +273,9 @@ class SpotlightWindow(QMainWindow):
 
         results: List[SearchResultItem] = response.get("results", [])
         latency = response.get("latency_ms", 0)
+
+        # Sort results naturally A-Z (case-insensitive / in hoa or not), tie-breaker by most recent time
+        results = sort_search_results(results, "abc")
 
         self.result_list.clear()
 

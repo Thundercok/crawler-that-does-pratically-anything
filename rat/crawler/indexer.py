@@ -152,6 +152,26 @@ class Indexer:
                     chunk_embeddings = embedder.embed_texts(chunk_texts)
                     self.db.save_document_chunks(doc_id, str(path), chunks, chunk_embeddings)
 
+                    # Dynamic VectorCache sync (eliminates index staleness)
+                    try:
+                        from rat.engine.vector_cache import vector_cache
+                        if vector_cache._is_loaded:
+                            new_recs = [{
+                                "chunk_id": -1,
+                                "doc_id": doc_id,
+                                "file_path": str(path),
+                                "file_name": doc["file_name"],
+                                "file_ext": doc["file_ext"],
+                                "file_size": doc["file_size"],
+                                "created_at": doc["created_at"],
+                                "modified_at": doc["modified_at"],
+                                "chunk_index": c.chunk_index,
+                                "chunk_text": c.text,
+                            } for c in chunks]
+                            vector_cache.append_vectors(new_recs, chunk_embeddings)
+                    except Exception as ve:
+                        logger.debug(f"Dynamic VectorCache sync note: {ve}")
+
             return True
         except Exception as e:
             logger.error(f"Error indexing {file_path_str}: {e}")

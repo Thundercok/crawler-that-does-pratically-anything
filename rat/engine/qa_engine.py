@@ -181,6 +181,106 @@ class DocumentQAEngine:
         # 3. Offline Extractive Reasoner (Default Zero-Setup fallback)
         return self._answer_extractive_heuristic(cleaned_text, question, file_name=file_name)
 
+    def synthesize_multi_document_answer(
+        self,
+        documents: List[Dict[str, Any]],
+        question: str,
+        use_cloud_if_available: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Phase 6 of FR-CoT: Multi-document synthesis across top retrieved files.
+        Synthesizes facts, resolves discrepancies across version trees, and cites sources.
+        """
+        if not documents:
+            return {
+                "answer": "Không tìm thấy tài liệu phù hợp để tổng hợp câu trả lời.",
+                "sources": [],
+                "engine": "None",
+                "confidence": 0.0,
+            }
+
+        # Extract top paragraphs per document
+        source_excerpts = []
+        sources = []
+        for doc in documents[:4]:
+            fname = doc.get("file_name", "Tài liệu")
+            fpath = doc.get("file_path", "")
+            content = doc.get("content_text", "")
+            if not content:
+                continue
+            paras = self.extract_relevant_paragraphs(content, question, max_paragraphs=2)
+            if paras:
+                para_texts = [p[0].replace("\n", " ").strip() for p in paras]
+                source_excerpts.append(f"📄 [{fname}]:\n" + "\n".join(f"- {pt}" for pt in para_texts))
+                sources.append({"file_name": fname, "file_path": fpath})
+
+        if not source_excerpts:
+            return {
+                "answer": f"Đã quét {len(documents)} tệp tin nhưng không trích xuất được đoạn nội dung khớp với câu hỏi.",
+                "sources": sources,
+                "engine": "None",
+                "confidence": 0.2,
+            }
+
+        combined_context = "\n\n".join(source_excerpts)
+
+        # 1. Try Local SLM
+        if config.use_slm and self.slm.is_model_installed():
+            try:
+                slm_prompt = (
+                    f"Dưới đây là các trích đoạn từ nhiều tệp tin liên quan:\n\n{combined_context[:8000]}\n\n"
+                    f"Câu hỏi của người dùng: {question}\n\n"
+                    "Hãy tổng hợp câu trả lời ngắn gọn, chính xác bằng tiếng Việt, ghi rõ thông tin lấy từ tệp tin nào:"
+                )
+                slm_ans = self.slm.generate(slm_prompt, system_prompt=DOCUMENT_QA_SYSTEM_PROMPT)
+                if slm_ans and not slm_ans.startswith("⚠️") and "Lỗi" not in slm_ans:
+                    source_names = [s["file_name"] for s in sources if s.get("file_name")]
+                    if not any(sn in slm_ans for sn in source_names):
+                        slm_ans += f"\n\n📌 **Nguồn trích dẫn**: {', '.join(source_names)}"
+                    return {
+                        "answer": slm_ans,
+                        "sources": sources,
+                        "engine": f"Local SLM Multi-Doc ({self.slm.model})",
+                        "confidence": 0.92,
+                    }
+            except Exception as e:
+                logger.debug(f"SLM multi-doc synthesis failed: {e}")
+
+        # 2. Try Cloud LLM
+        if use_cloud_if_available and (config.gemini_api_key or config.openai_api_key):
+            try:
+                cloud_prompt = (
+                    f"Dưới đây là các trích đoạn từ các tài liệu:\n\n{combined_context[:12000]}\n\n"
+                    f"Câu hỏi: {question}\n\n"
+                    "Hãy tổng hợp câu trả lời đa nguồn chính xác, nêu rõ nguồn gốc tệp:"
+                )
+                cloud_ans = self.llm.call_llm(cloud_prompt, system_prompt=DOCUMENT_QA_SYSTEM_PROMPT)
+                if cloud_ans:
+                    source_names = [s["file_name"] for s in sources if s.get("file_name")]
+                    if not any(sn in cloud_ans for sn in source_names):
+                        cloud_ans += f"\n\n📌 **Nguồn trích dẫn**: {', '.join(source_names)}"
+                    return {
+                        "answer": cloud_ans,
+                        "sources": sources,
+                        "engine": f"Cloud LLM Multi-Doc ({config.llm_provider.upper()})",
+                        "confidence": 0.96,
+                    }
+            except Exception as e:
+                logger.debug(f"Cloud multi-doc synthesis failed: {e}")
+
+        # 3. Offline Heuristic Multi-Doc Extractor
+        lines = [f"📊 **Tổng hợp thông tin từ {len(sources)} tệp tin liên quan:**\n"]
+        for exc in source_excerpts:
+            lines.append(exc)
+            lines.append("")
+
+        return {
+            "answer": "\n".join(lines).strip(),
+            "sources": sources,
+            "engine": "Offline Multi-Doc Reasoner",
+            "confidence": 0.80,
+        }
+
 
 # Global singleton instance
 qa_engine = DocumentQAEngine()

@@ -59,8 +59,14 @@ def cmd_index(directories: Optional[List[str]] = None) -> None:
     console.print(f"[bold green]✓ Hoàn tất![/bold green] Đã cập nhật {indexed}/{total} tệp. Tổng kho lưu trữ: {stats['total_files']} tệp (~{size_mb:.1f} MB).")
 
 
-def cmd_search(query: str, limit: int = 10, open_first: bool = False, reveal_first: bool = False) -> None:
-    """Search files using natural language query."""
+def cmd_search(
+    query: str,
+    limit: int = 10,
+    open_first: bool = False,
+    reveal_first: bool = False,
+    show_trace: bool = False
+) -> None:
+    """Search files using natural language query with optional FR-CoT reasoning trace."""
     engine = SearchEngine()
     response = engine.search(query, limit=limit)
 
@@ -115,6 +121,10 @@ def cmd_search(query: str, limit: int = 10, open_first: bool = False, reveal_fir
         )
 
     console.print(table)
+
+    trace = response.get("reasoning_trace")
+    if trace and any(arg in sys.argv for arg in ["--trace", "-t", "--cot"]):
+        console.print(Panel(trace.render_markdown(), title="🧠 FR-CoT Multi-Step Reasoning Trace", border_style="cyan"))
 
     if open_first and results:
         first = results[0]
@@ -230,6 +240,7 @@ def main() -> None:
     search_parser.add_argument("-n", "--limit", type=int, default=10, help="Max results")
     search_parser.add_argument("-o", "--open", action="store_true", help="Open best matching file")
     search_parser.add_argument("-f", "--finder", action="store_true", help="Reveal best match in Finder")
+    search_parser.add_argument("-t", "--trace", "--cot", dest="trace", action="store_true", help="Display FR-CoT Multi-Step Reasoning Trace")
 
     # Ask SLM command
     ask_parser = subparsers.add_parser("ask", help="Ask local SLM a question about a file")
@@ -247,7 +258,7 @@ def main() -> None:
     if args.command == "index":
         cmd_index(args.dirs if args.dirs else None)
     elif args.command == "search":
-        cmd_search(args.query, limit=args.limit, open_first=args.open, reveal_first=args.finder)
+        cmd_search(args.query, limit=args.limit, open_first=args.open, reveal_first=args.finder, show_trace=getattr(args, "trace", False))
     elif args.command == "ask":
         cmd_ask(args.file_query, args.question)
     elif args.command == "dedup":

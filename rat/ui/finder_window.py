@@ -18,6 +18,7 @@ from PyQt6.QtGui import QColor, QFont, QGuiApplication, QIcon, QKeySequence, QPi
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -38,7 +39,7 @@ from rat.crawler.dedup import dedup_engine
 from rat.crawler.extractors import extract_document_content
 from rat.engine.hybrid_search import SearchEngine
 from rat.engine.qa_engine import qa_engine
-from rat.engine.reranker import SearchResultItem, format_file_size, format_relative_time
+from rat.engine.reranker import SearchResultItem, format_file_size, format_relative_time, sort_search_results
 from rat.ui.apple_item_delegate import AppleSpotlightDelegate
 from rat.ui.preview_panel import EXT_DESCRIPTIONS, open_file_default, reveal_in_finder
 from rat.ui.theme import RAYCAST_QSS, get_ext_badge_info
@@ -133,7 +134,7 @@ class AsyncSearchWorker(QObject):
                 version_info=v_info,
             )
             items.append(item)
-        return items
+        return sort_search_results(items, "abc")
 
 
 class AsyncQAWorker(QObject):
@@ -373,6 +374,7 @@ class FinderWindow(QMainWindow):
         self.active_collection_idx = 0
         self._request_id = 0
         self.current_results: List[SearchResultItem] = []
+        self.current_sort_mode = "abc"
 
         # Search debounce timer
         self.search_timer = QTimer(self)
@@ -521,12 +523,42 @@ class FinderWindow(QMainWindow):
 
         center_layout.addLayout(search_row)
 
-        # Status Bar
+        # Status Bar & Sort Selector Row
         status_row = QHBoxLayout()
+        status_row.setSpacing(6)
         self.status_label = QLabel("Đang tải dữ liệu...")
         self.status_label.setStyleSheet("color: #8e8e93; font-size: 11px;")
         status_row.addWidget(self.status_label)
         status_row.addStretch()
+
+        sort_label = QLabel("Sắp xếp:")
+        sort_label.setStyleSheet("color: #636366; font-size: 11.5px; font-weight: 500;")
+        status_row.addWidget(sort_label)
+
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItem("🔤 Tên A-Z (Bảng chữ cái)", "abc")
+        self.sort_combo.addItem("🕒 Mới nhất (Thời gian gần nhất)", "recent")
+        self.sort_combo.addItem("🎯 Độ phù hợp (Khớp nhất)", "score")
+        self.sort_combo.addItem("📦 Kích thước (Lớn → Nhỏ)", "size")
+        self.sort_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #f2f2f7;
+                color: #1c1c1e;
+                border: 1px solid #d1d1d6;
+                border-radius: 6px;
+                padding: 2px 8px;
+                font-size: 11.5px;
+                font-weight: 500;
+            }
+            QComboBox:hover {
+                background-color: #e5e5ea;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+        """)
+        self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        status_row.addWidget(self.sort_combo)
         center_layout.addLayout(status_row)
 
         # Beautiful Custom Rendered Results List
@@ -598,6 +630,28 @@ class FinderWindow(QMainWindow):
         self.status_label.setText("⚡ Đang tìm kiếm...")
         self.search_requested.emit(self._request_id, query, col_key, exts)
 
+    def _on_sort_changed(self, index: int) -> None:
+        mode = self.sort_combo.itemData(index)
+        if mode:
+            self.current_sort_mode = mode
+            self._populate_results_list()
+
+    def _populate_results_list(self) -> None:
+        sorted_items = sort_search_results(self.current_results, self.current_sort_mode)
+        self.current_results = sorted_items
+
+        self.results_list.clear()
+        for item in sorted_items:
+            list_item = QListWidgetItem()
+            list_item.setSizeHint(QSize(self.results_list.width(), 58))
+            list_item.setData(Qt.ItemDataRole.UserRole, item)
+            self.results_list.addItem(list_item)
+
+        if sorted_items:
+            self.results_list.setCurrentRow(0)
+        else:
+            self.preview_panel.set_item(None)
+
     @pyqtSlot(int, dict)
     def _on_search_finished(self, req_id: int, response: Dict[str, Any]) -> None:
         if req_id != self._request_id:
@@ -605,19 +659,8 @@ class FinderWindow(QMainWindow):
 
         results: List[SearchResultItem] = response.get("results", [])
         self.current_results = results
-        self.status_label.setText(f"Hiển thị {len(results)} tệp tin phù hợp")
-
-        self.results_list.clear()
-        for item in results:
-            list_item = QListWidgetItem()
-            list_item.setSizeHint(QSize(self.results_list.width(), 58))
-            list_item.setData(Qt.ItemDataRole.UserRole, item)
-            self.results_list.addItem(list_item)
-
-        if results:
-            self.results_list.setCurrentRow(0)
-        else:
-            self.preview_panel.set_item(None)
+        self.status_label.setText(f"Hiển thị {len(results)} tệp tin")
+        self._populate_results_list()
 
     def _on_list_row_changed(self, row: int) -> None:
         if 0 <= row < len(self.current_results):

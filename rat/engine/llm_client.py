@@ -129,22 +129,33 @@ class LLMClient:
 
     def generate(self, prompt: str) -> Optional[str]:
         """Generate response choosing the optimal active provider."""
+        return self.call_llm(prompt)
+
+    def call_llm(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_tokens: int = 1000
+    ) -> Optional[str]:
+        """Generate response with optional system prompt and max tokens."""
         # Refresh keys in case config changed
         self.gemini_key = config.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
         self.openai_key = config.openai_api_key or os.getenv("OPENAI_API_KEY", "")
 
+        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+
         if self.provider == "gemini" or (self.provider == "auto" and self.gemini_key):
-            res = self.query_gemini(prompt)
+            res = self.query_gemini(full_prompt)
             if res:
                 return res
 
         if self.provider == "openai" or (self.provider == "auto" and self.openai_key):
-            res = self.query_openai(prompt)
+            res = self.query_openai(full_prompt)
             if res:
                 return res
 
         if self.provider == "ollama":
-            res = self.query_ollama(prompt)
+            res = self.query_ollama(full_prompt)
             if res:
                 return res
 
