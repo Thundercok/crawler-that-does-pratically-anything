@@ -78,7 +78,20 @@ class Config:
         self.use_slm: bool = True
         self.auto_watch: bool = True
         self.max_results: int = 15
+        self.global_hotkey: str = os.getenv("RAT_HOTKEY", "<alt>+<shift>+<space>")
         self.load()
+
+    def get_hotkey_display(self) -> str:
+        """Return native macOS symbols representation for global_hotkey."""
+        key = self.global_hotkey
+        key = key.replace("<alt>", "⌥").replace("<option>", "⌥")
+        key = key.replace("<shift>", "⇧")
+        key = key.replace("<cmd>", "⌘").replace("<super>", "⌘")
+        key = key.replace("<ctrl>", "⌃")
+        key = key.replace("<space>", "Space")
+        key = key.replace("<", "").replace(">", "")
+        parts = [p.strip().capitalize() if p.strip() not in ["⌥", "⇧", "⌘", "⌃"] else p.strip() for p in key.split("+")]
+        return " + ".join(parts)
 
     def load(self) -> None:
         """Load settings from config.json if exists."""
@@ -102,6 +115,8 @@ class Config:
                         self.auto_watch = data["auto_watch"]
                     if "max_results" in data:
                         self.max_results = data["max_results"]
+                    if "global_hotkey" in data:
+                        self.global_hotkey = data["global_hotkey"]
             except Exception:
                 pass
 
@@ -116,6 +131,7 @@ class Config:
             "ollama_model": self.ollama_model,
             "auto_watch": self.auto_watch,
             "max_results": self.max_results,
+            "global_hotkey": self.global_hotkey,
         }
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)

@@ -9,11 +9,13 @@ import logging
 import threading
 from typing import Callable, Optional
 
+from rat.config import config
+
 logger = logging.getLogger("rat.os.hotkey")
 
 
 class GlobalHotkeyManager:
-    """Manages system-wide global shortcuts (Option + Space, Cmd + Shift + Space)."""
+    """Manages system-wide global shortcuts without conflicting with macOS or third-party apps."""
 
     def __init__(self, on_trigger: Optional[Callable[[], None]] = None) -> None:
         self.on_trigger = on_trigger
@@ -34,17 +36,22 @@ class GlobalHotkeyManager:
                 if self.on_trigger:
                     self.on_trigger()
 
-            # Listen for Control+Space (<ctrl>+<space>) as requested, plus Cmd+Shift+Space and Option+Space as fallbacks
+            # Non-conflicting shortcuts:
+            # Avoids Control+Space (collides with macOS Vietnamese Input Source switch and IDE autocomplete)
+            # Avoids Option+Space (collides with Raycast and Alfred)
+            # Avoids Command+Space (collides with Apple Spotlight)
+            primary = config.global_hotkey.strip()
             hotkeys = {
-                "<ctrl>+<space>": _handle_activate,
-                "<alt>+<space>": _handle_activate,
-                "<cmd>+<shift>+<space>": _handle_activate,
+                primary: _handle_activate,
             }
+            # Add Option+R ("R" for RAT) as secondary fallback if not primary
+            if primary != "<alt>+r":
+                hotkeys["<alt>+r"] = _handle_activate
 
             self._listener = keyboard.GlobalHotKeys(hotkeys)
             self._listener.start()
             self._running = True
-            logger.info("Global Hotkey Manager started successfully (<ctrl>+<space>).")
+            logger.info(f"Global Hotkey Manager started with conflict-free hotkey: {config.get_hotkey_display()} ({list(hotkeys.keys())})")
             return True
         except Exception as e:
             logger.warning(f"Failed to start GlobalHotKeys listener: {e}")

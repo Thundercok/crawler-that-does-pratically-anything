@@ -93,7 +93,7 @@ class SystemTrayManager:
         """)
 
         # Search Quick Actions
-        action_spotlight = QAction("🔍 Tìm kiếm nhanh (⌃ + Space)", menu)
+        action_spotlight = QAction(f"🔍 Tìm kiếm nhanh ({config.get_hotkey_display()})", menu)
         if self.on_open_spotlight:
             action_spotlight.triggered.connect(self.on_open_spotlight)
         menu.addAction(action_spotlight)
