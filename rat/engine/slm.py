@@ -158,9 +158,19 @@ class SLMEngine:
             )
             if response:
                 # Clean any markdown block if present
-                clean_json = re.sub(r"^```json\s*", "", response, flags=re.MULTILINE)
+                clean_json = re.sub(r"^```(?:json)?\s*", "", response.strip(), flags=re.MULTILINE)
                 clean_json = re.sub(r"```$", "", clean_json, flags=re.MULTILINE).strip()
-                data = json.loads(clean_json)
+                data = None
+                try:
+                    data = json.loads(clean_json)
+                except Exception:
+                    # Regex fallback for small models with conversational preface
+                    match = re.search(r"\{.*\}", clean_json, re.DOTALL)
+                    if match:
+                        try:
+                            data = json.loads(match.group(0))
+                        except Exception:
+                            pass
                 if isinstance(data, dict):
                     # Ensure all extensions have leading dot
                     raw_exts = data.get("file_extensions", [])

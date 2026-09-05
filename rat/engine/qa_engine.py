@@ -97,7 +97,23 @@ class DocumentQAEngine:
             }
 
         q_norm = remove_accents(question).lower()
-        is_summary = any(k in q_norm for k in ["tom tat", "y chinh", "tong quan", "noi dung"])
+        is_summary = any(k in q_norm for k in ["tom tat", "y chinh", "tong quan", "noi dung", "summary"])
+        q_words = [w for w in re.findall(r"\w+", q_norm) if len(w) > 2]
+
+        # Extract precise key sentences containing query terms & numbers
+        key_sentences: List[str] = []
+        for p, _ in relevant_paras:
+            sentences = re.split(r"(?<=[.!?\n])\s+", p)
+            for s in sentences:
+                s_clean = s.strip()
+                if len(s_clean) < 15:
+                    continue
+                s_norm = remove_accents(s_clean).lower()
+                hits = sum(1 for w in q_words if w in s_norm)
+                has_num = any(ch.isdigit() for ch in s_clean)
+                if hits >= 2 or (hits >= 1 and has_num):
+                    if s_clean not in key_sentences:
+                        key_sentences.append(s_clean)
 
         formatted_lines = []
         if is_summary:
@@ -108,11 +124,21 @@ class DocumentQAEngine:
                     clean_p = clean_p[:275] + "..."
                 formatted_lines.append(f"• {clean_p}")
         else:
-            formatted_lines.append(f"🔍 **Thông tin liên quan tìm thấy trong `{file_name}`:**\n")
-            for idx, (p, score) in enumerate(relevant_paras, 1):
+            if key_sentences:
+                formatted_lines.append(f"🎯 **Trọng tâm phát hiện trong `{file_name}`:**")
+                for s in key_sentences[:3]:
+                    clean_s = s.replace("\n", " ").strip()
+                    if len(clean_s) > 200:
+                        clean_s = clean_s[:195] + "..."
+                    formatted_lines.append(f"• {clean_s}")
+                formatted_lines.append("\n📄 **Trích đoạn ngữ cảnh:**")
+            else:
+                formatted_lines.append(f"🔍 **Thông tin liên quan tìm thấy trong `{file_name}`:**\n")
+
+            for idx, (p, score) in enumerate(relevant_paras[:2], 1):
                 clean_p = p.replace("\n", " ").strip()
-                if len(clean_p) > 350:
-                    clean_p = clean_p[:345] + "..."
+                if len(clean_p) > 300:
+                    clean_p = clean_p[:295] + "..."
                 formatted_lines.append(f"> \"{clean_p}\"")
 
         snippets = [p[0] for p in relevant_paras]
@@ -120,7 +146,7 @@ class DocumentQAEngine:
             "answer": "\n".join(formatted_lines),
             "snippets": snippets,
             "engine": "Offline Extractive Reasoner (100% On-Device)",
-            "confidence": 0.85,
+            "confidence": 0.88,
         }
 
     def answer_question(
