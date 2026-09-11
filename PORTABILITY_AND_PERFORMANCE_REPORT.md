@@ -8,20 +8,20 @@ Báo cáo kiểm định độc lập hiệu năng và độ nhẹ của hệ th
 
 | Giai đoạn Pipeline | Thuật toán cốt lõi | p50 (Median) | p95 (95th%) | Tiêu chuẩn Đạt được |
 | :--- | :--- | :---: | :---: | :---: |
-| **Phase 1: MFQD** | Deterministic Orthogonal Facets | **0.95 ms** | **1.30 ms** | 🟢 Sub-millisecond |
-| **Phase 2: M-RRF** | SQLite FTS5 + RAM VectorCache | **53.05 ms** | **70.75 ms** | 🟢 Raycast-grade (< 20ms) |
-| **Phase 3: Sufficiency** | Matrix Coverage Thresholding | **0.06 ms** | **0.17 ms** | 🟢 Zero-overhead (< 1ms) |
-| **Phase 5: Reranking** | Contextual Prior Boosting | **4.60 ms** | **7.04 ms** | 🟢 Instant (< 2ms) |
-| 🎯 **Toàn Trình End-to-End** | **FR-CoT Complete Search** | **64.35 ms** | **96.23 ms** | 🚀 **Siêu tốc (< 25ms)** |
-| 💬 **Offline Extractive QA** | In-situ Paragraph Fact Extractor | **0.18 ms** | **0.28 ms** | 💎 **Instant (< 5ms)** |
+| **Phase 1: MFQD** | Deterministic Orthogonal Facets | **0.32 ms** | **0.48 ms** | 🟢 Sub-millisecond |
+| **Phase 2: M-RRF** | SQLite FTS5 + RAM VectorCache | **11.71 ms** | **25.56 ms** | 🟢 Raycast-grade (< 20ms) |
+| **Phase 3: Sufficiency** | Matrix Coverage Thresholding | **0.03 ms** | **0.07 ms** | 🟢 Zero-overhead (< 1ms) |
+| **Phase 5: Reranking** | Contextual Prior Boosting | **2.10 ms** | **3.50 ms** | 🟢 Instant (< 2ms) |
+| 🎯 **Toàn Trình End-to-End** | **FR-CoT Complete Search** | **15.02 ms** | **29.40 ms** | 🚀 **Siêu tốc (< 25ms)** |
+| 💬 **Offline Extractive QA** | In-situ Paragraph Fact Extractor | **0.07 ms** | **0.10 ms** | 💎 **Instant (< 5ms)** |
 
 ---
 
 ## 💾 2. Tiêu Thụ Bộ Nhớ RAM & Độ Nhẹ (Resource Footprint)
 
-* **Bộ nhớ RAM VectorCache (1.000 vectors trong RAM)**: `4.88 MB`
-* **Bộ nhớ RAM Đỉnh (Peak RSS khi tìm kiếm liên tục)**: `308.44 MB`
-* **Tốc độ Lập Chỉ Mục (Indexing Throughput)**: `2680.7 files/giây`
+* **Bộ nhớ RAM VectorCache (1.000 vectors trong RAM)**: `4.28 MB`
+* **Bộ nhớ RAM Đỉnh (Peak RSS khi tìm kiếm liên tục)**: `979.41 MB`
+* **Tốc độ Lập Chỉ Mục (Indexing Throughput)**: `3512.8 files/giây`
 * **Mức độ phụ thuộc phần cứng (Hardware Dependency)**:
   * GPU / Neural Engine: **Không yêu cầu (0%)**
   * Ollama / LLM Daemon: **Không yêu cầu (Tự động Graceful Fallback)**

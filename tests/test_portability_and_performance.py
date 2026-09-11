@@ -261,6 +261,45 @@ class TestPortabilityAndPerformance(unittest.TestCase):
 
         self.assertTrue(passed)
 
+    def test_embedder_lru_cache(self) -> None:
+        """Verify that LocalEmbedder caches query embeddings in memory."""
+        embedder = LocalEmbedder()
+        mock_vec = np.ones(embedder.dimension, dtype=np.float32) / np.sqrt(embedder.dimension)
+        with patch.object(embedder, "embed_texts", return_value=np.array([mock_vec])) as mock_embed:
+            # First call
+            v1 = embedder.embed_query("test query")
+            self.assertEqual(mock_embed.call_count, 1)
+
+            # Second call with same query should hit cache
+            v2 = embedder.embed_query("test query")
+            self.assertEqual(mock_embed.call_count, 1)
+            np.testing.assert_allclose(v1, v2)
+
+            # Different query should call embed_texts
+            v3 = embedder.embed_query("another query")
+            self.assertEqual(mock_embed.call_count, 2)
+
+    def test_short_query_skips_dense_vector_search(self) -> None:
+        """Verify queries < 3 characters rely solely on lexical search, skipping dense vectors."""
+        with patch.object(self.search_engine.embedder, "embed_query") as mock_embed:
+            res = self.search_engine.search("ab", use_vector=True)
+            self.assertEqual(mock_embed.call_count, 0)
+            self.assertEqual(res["dense_count"], 0)
+
+    def test_watcher_filters_unsupported_extensions(self) -> None:
+        """Verify watcher handler ignores unsupported extensions and non-files."""
+        from rat.crawler.watcher import RatFileEventHandler
+        handler = RatFileEventHandler(Indexer(db=self.db))
+        try:
+            self.assertFalse(handler._should_handle("some/file.tmp"))
+            self.assertFalse(handler._should_handle("some/file.db-wal"))
+            self.assertFalse(handler._should_handle("some/file.git"))
+            self.assertTrue(handler._should_handle("some/file.pdf"))
+            self.assertTrue(handler._should_handle("some/file.docx"))
+            self.assertTrue(handler._should_handle("some/file.py"))
+        finally:
+            handler.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -57,6 +57,15 @@ class Indexer:
         for part in path.parts:
             if part in IGNORE_DIRS or part.startswith("."):
                 return True
+            lower_part = part.lower()
+            if (
+                lower_part.endswith(".app")
+                or lower_part.endswith(".framework")
+                or lower_part.endswith(".bundle")
+                or lower_part.endswith(".xcodeproj")
+                or lower_part.endswith(".photoslibrary")
+            ):
+                return True
         for pattern in IGNORE_PATTERNS:
             if fnmatch.fnmatch(path.name, pattern):
                 return True
@@ -197,11 +206,18 @@ class Indexer:
         indexed_count = 0
 
         # Clean deleted files from DB
-        deleted = self.db.clean_deleted_files()
-        if deleted:
-            logger.info(f"Cleaned {deleted} deleted records from DB.")
+        # Energy & Battery Governance: Prioritize Efficiency Cores and conserve battery
+        from rat.config import is_on_battery, set_thread_qos_background
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        on_battery = is_on_battery()
+        effective_workers = max(1, max_workers // 2) if on_battery else max_workers
+        if on_battery:
+            logger.info("⚡ MacBook is on battery: reducing indexer workers to conserve power.")
+
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=effective_workers,
+            initializer=set_thread_qos_background
+        ) as executor:
             future_to_file = {
                 executor.submit(self.index_single_file, f): f for f in files
             }

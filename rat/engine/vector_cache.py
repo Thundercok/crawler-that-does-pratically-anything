@@ -30,14 +30,14 @@ class VectorCache:
         self._lock = threading.RLock()
 
     def preload(self) -> None:
-        """Load all chunk vectors from SQLite into contiguous RAM memory."""
+        """Load all chunk vectors from SQLite into contiguous RAM memory without text payload bloat."""
         with self._lock:
             t0 = time.time()
             conn = self.db.get_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT 
-                    c.id as chunk_id, c.doc_id, c.file_path, c.chunk_index, c.chunk_text, c.embedding,
+                    c.id as chunk_id, c.doc_id, c.file_path, c.chunk_index, c.embedding,
                     d.file_name, d.file_ext, d.file_size, d.created_at, d.modified_at
                 FROM document_chunks c
                 JOIN documents d ON c.doc_id = d.id
@@ -64,14 +64,13 @@ class VectorCache:
                     "created_at": row["created_at"],
                     "modified_at": row["modified_at"],
                     "chunk_index": row["chunk_index"],
-                    "chunk_text": row["chunk_text"],
                 })
 
             if emb_list:
                 self._matrix = np.vstack(emb_list)
                 self._records = records
                 self._is_loaded = True
-                logger.info(f"VectorCache preloaded {len(records)} chunks in {time.time()-t0:.3f}s")
+                logger.info(f"VectorCache preloaded {len(records)} chunks in {time.time()-t0:.3f}s (RAM optimized)")
             else:
                 self._matrix = np.empty((0, 384), dtype=np.float32)
                 self._records = []
@@ -87,7 +86,7 @@ class VectorCache:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """
-        Execute instant in-memory Cosine Similarity search (< 1.5ms).
+        Execute instant in-memory Cosine Similarity search (< 1.5ms) with lazy text enrichment.
         """
         if not self._is_loaded:
             self.preload()
@@ -135,12 +134,33 @@ class VectorCache:
 
             # Sort descending by similarity
             results.sort(key=lambda x: x["similarity_score"], reverse=True)
-            return results[:limit]
+            top_results = results[:limit]
+
+            # Lazy-enrich chunk_text from SQLite only for the top-k results
+            chunk_ids = [r["chunk_id"] for r in top_results if r.get("chunk_id") and r["chunk_id"] > 0]
+            if chunk_ids:
+                try:
+                    placeholders = ",".join(["?"] * len(chunk_ids))
+                    conn = self.db.get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute(f"SELECT id, chunk_text FROM document_chunks WHERE id IN ({placeholders})", chunk_ids)
+                    text_map = {row["id"]: row["chunk_text"] for row in cursor.fetchall()}
+                    for r in top_results:
+                        r["chunk_text"] = text_map.get(r.get("chunk_id"), "")
+                except Exception as e:
+                    logger.debug(f"Failed to lazy-enrich chunk_text: {e}")
+                    for r in top_results:
+                        r.setdefault("chunk_text", "")
+            else:
+                for r in top_results:
+                    r.setdefault("chunk_text", "")
+
+            return top_results
 
     def append_vectors(self, new_records: List[Dict[str, Any]], embeddings: np.ndarray) -> None:
         """
         Dynamically append newly indexed chunks and embeddings to RAM matrix without full reload.
-        Solves vector cache staleness when watcher or indexer adds files.
+        Strips chunk_text payload to maintain minimal RAM footprint.
         """
         if not new_records or embeddings is None or len(embeddings) == 0:
             return
@@ -156,12 +176,18 @@ class VectorCache:
                 embeddings = embeddings.reshape(1, -1)
             embeddings = embeddings.astype(np.float32)
 
+            lean_records = []
+            for r in new_records:
+                rec_copy = dict(r)
+                rec_copy.pop("chunk_text", None)
+                lean_records.append(rec_copy)
+
             if self._matrix.size == 0:
                 self._matrix = embeddings
-                self._records = list(new_records)
+                self._records = lean_records
             else:
                 self._matrix = np.vstack([self._matrix, embeddings])
-                self._records.extend(new_records)
+                self._records.extend(lean_records)
 
             logger.debug(f"VectorCache dynamically appended {len(new_records)} chunks. Total: {len(self._records)}")
 

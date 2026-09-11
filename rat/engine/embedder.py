@@ -13,7 +13,7 @@ import numpy as np
 
 logger = logging.getLogger("rat.embedder")
 
-DEFAULT_EMBED_MODEL = "BAAI/bge-small-en-v1.5"
+DEFAULT_EMBED_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 
 class LocalEmbedder:
@@ -24,6 +24,38 @@ class LocalEmbedder:
         self._model = None
         self._dimension: int = 384
         self._lock = threading.Lock()
+        self._query_cache: dict[str, np.ndarray] = {}
+        self._cache_lock = threading.Lock()
+        self._cache_maxsize: int = 512
+        self._last_accessed: float = 0.0
+
+    @property
+    def is_loaded(self) -> bool:
+        """Return True if model is currently resident in RAM."""
+        return self._model is not None
+
+    @property
+    def last_accessed(self) -> float:
+        """Return unix timestamp of last embedding operation."""
+        return self._last_accessed
+
+    def evict(self) -> bool:
+        """
+        Evict the embedding model and ONNX runtime session from RAM.
+        Frees ~250MB - 350MB when memory pressure occurs or system goes to sleep.
+        Returns True if model was unloaded, False if it was already cold.
+        """
+        with self._lock:
+            if self._model is not None:
+                logger.info(f"Evicting LocalEmbedder ({self.model_name}) from RAM due to memory governance.")
+                del self._model
+                self._model = None
+                with self._cache_lock:
+                    self._query_cache.clear()
+                import gc
+                gc.collect()
+                return True
+            return False
 
     def _load_model(self):
         if self._model is None:
@@ -39,6 +71,7 @@ class LocalEmbedder:
                     except Exception as e:
                         logger.error(f"Failed to initialize FastEmbed: {e}")
                         self._model = None
+        self._last_accessed = time.time()
         return self._model
 
     @property
@@ -75,11 +108,28 @@ class LocalEmbedder:
 
     def embed_query(self, query: str) -> np.ndarray:
         """
-        Generate normalized 1D vector embedding for a search query.
+        Generate normalized 1D vector embedding for a search query with caching.
         Returns: 1D numpy array of shape (dim,).
         """
-        matrix = self.embed_texts([query])
-        return matrix[0]
+        clean_q = query.strip()
+        if not clean_q:
+            return np.zeros(self._dimension, dtype=np.float32)
+
+        with self._cache_lock:
+            if clean_q in self._query_cache:
+                self._last_accessed = time.time()
+                return self._query_cache[clean_q].copy()
+
+        matrix = self.embed_texts([clean_q])
+        res = matrix[0] if len(matrix) > 0 else np.zeros(self._dimension, dtype=np.float32)
+
+        with self._cache_lock:
+            if len(self._query_cache) >= self._cache_maxsize:
+                oldest_key = next(iter(self._query_cache))
+                del self._query_cache[oldest_key]
+            self._query_cache[clean_q] = res
+
+        return res.copy()
 
     @staticmethod
     def compute_similarity(query_vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:

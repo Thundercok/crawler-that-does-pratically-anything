@@ -71,9 +71,19 @@ class Database:
                     md5_hash TEXT,
                     content_text TEXT,
                     summary TEXT,
+                    normalized_text TEXT,
                     indexed_at REAL NOT NULL
                 );
             """)
+
+            # Schema migration: ensure normalized_text exists in existing documents table
+            cursor.execute("PRAGMA table_info(documents);")
+            existing_cols = [row["name"] for row in cursor.fetchall()]
+            if "normalized_text" not in existing_cols:
+                try:
+                    cursor.execute("ALTER TABLE documents ADD COLUMN normalized_text TEXT;")
+                except Exception as e:
+                    logger.debug(f"Migration note for normalized_text: {e}")
 
             # Fast compound indexes for instantaneous collection filtering & deduplication
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_doc_ext ON documents(file_ext);")
@@ -110,7 +120,11 @@ class Database:
                     );
                 """)
 
-                # Triggers to keep FTS5 in sync with documents table
+                # Refresh triggers to keep FTS5 synchronized with real normalized_text
+                cursor.execute("DROP TRIGGER IF EXISTS docs_ai;")
+                cursor.execute("DROP TRIGGER IF EXISTS docs_ad;")
+                cursor.execute("DROP TRIGGER IF EXISTS docs_au;")
+
                 cursor.execute("""
                     CREATE TRIGGER IF NOT EXISTS docs_ai AFTER INSERT ON documents BEGIN
                         INSERT INTO documents_fts(rowid, file_name, content_text, normalized_text)
@@ -118,7 +132,7 @@ class Database:
                             new.id,
                             new.file_name,
                             new.content_text,
-                            new.file_name || ' ' || new.content_text
+                            coalesce(new.normalized_text, new.file_name || ' ' || new.content_text)
                         );
                     END;
                 """)
@@ -126,20 +140,20 @@ class Database:
                 cursor.execute("""
                     CREATE TRIGGER IF NOT EXISTS docs_ad AFTER DELETE ON documents BEGIN
                         INSERT INTO documents_fts(documents_fts, rowid, file_name, content_text, normalized_text)
-                        VALUES ('delete', old.id, old.file_name, old.content_text, old.file_name || ' ' || old.content_text);
+                        VALUES ('delete', old.id, old.file_name, old.content_text, coalesce(old.normalized_text, old.file_name || ' ' || old.content_text));
                     END;
                 """)
 
                 cursor.execute("""
                     CREATE TRIGGER IF NOT EXISTS docs_au AFTER UPDATE ON documents BEGIN
                         INSERT INTO documents_fts(documents_fts, rowid, file_name, content_text, normalized_text)
-                        VALUES ('delete', old.id, old.file_name, old.content_text, old.file_name || ' ' || old.content_text);
+                        VALUES ('delete', old.id, old.file_name, old.content_text, coalesce(old.normalized_text, old.file_name || ' ' || old.content_text));
                         INSERT INTO documents_fts(rowid, file_name, content_text, normalized_text)
                         VALUES (
                             new.id,
                             new.file_name,
                             new.content_text,
-                            new.file_name || ' ' || new.content_text
+                            coalesce(new.normalized_text, new.file_name || ' ' || new.content_text)
                         );
                     END;
                 """)
@@ -161,8 +175,8 @@ class Database:
                 INSERT INTO documents (
                     file_path, file_name, file_ext, file_size,
                     created_at, modified_at, md5_hash, content_text,
-                    summary, indexed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    summary, normalized_text, indexed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(file_path) DO UPDATE SET
                     file_name = excluded.file_name,
                     file_ext = excluded.file_ext,
@@ -172,6 +186,7 @@ class Database:
                     md5_hash = excluded.md5_hash,
                     content_text = excluded.content_text,
                     summary = excluded.summary,
+                    normalized_text = excluded.normalized_text,
                     indexed_at = excluded.indexed_at
             """, (
                 doc["file_path"],
@@ -183,6 +198,7 @@ class Database:
                 doc.get("md5_hash", ""),
                 content,
                 doc.get("summary", ""),
+                norm_text,
                 doc["indexed_at"],
             ))
             doc_id = cursor.lastrowid
@@ -320,6 +336,10 @@ class Database:
             for k in clean_keywords:
                 name_likes.append("d.file_name LIKE ?")
                 name_params.append(f"%{k}%")
+                k_unaccent = remove_vietnamese_accents(k)
+                if k_unaccent != k.lower():
+                    name_likes.append("d.file_name LIKE ?")
+                    name_params.append(f"%{k_unaccent}%")
 
             if name_likes:
                 name_where = " OR ".join(name_likes)
