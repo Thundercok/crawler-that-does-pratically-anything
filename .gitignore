@@ -8,3 +8,7 @@ __pycache__/
 htmlcov/
 *.db
 .rat/
+build/
+dist/
+*.dmg
+dmg_temp/
