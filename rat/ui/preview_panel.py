@@ -86,6 +86,31 @@ def reveal_in_finder(file_path: str) -> None:
         subprocess.run(["xdg-open", parent_dir])
 
 
+def trigger_quicklook(file_path: str) -> None:
+    """Trigger genuine native macOS QuickLook preview (qlmanage -p)."""
+    if not file_path or not os.path.exists(file_path):
+        return
+    system = platform.system()
+    if system == "Darwin":
+        subprocess.Popen(["qlmanage", "-p", file_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        open_file_default(file_path)
+
+
+def open_in_terminal(file_path: str) -> None:
+    """Open containing folder of file in macOS Terminal."""
+    if not file_path or not os.path.exists(file_path):
+        return
+    dir_path = file_path if os.path.isdir(file_path) else os.path.dirname(file_path)
+    system = platform.system()
+    if system == "Darwin":
+        subprocess.Popen(["open", "-a", "Terminal", dir_path])
+    elif system == "Windows":
+        subprocess.Popen(["cmd.exe", "/K", f"cd /d {dir_path}"], shell=True)
+    else:
+        subprocess.Popen(["xdg-open", dir_path])
+
+
 class PreviewPanel(QFrame):
     """SOTA Apple macOS Sequoia & Raycast Inspector Panel."""
     ask_requested = pyqtSignal(str, str, str)  # (file_path, file_name, question)
@@ -143,8 +168,30 @@ class PreviewPanel(QFrame):
         title_col.addWidget(self.name_label)
         title_col.addWidget(self.meta_sub_label)
 
+        self.btn_quicklook = QPushButton("👁️ Xem nhanh")
+        self.btn_quicklook.setToolTip("Mở macOS Quick Look (Phím Space hoặc ⌘Y)")
+        self.btn_quicklook.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_quicklook.setStyleSheet("""
+            QPushButton {
+                background-color: #f1f5f9;
+                color: #334155;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 5px 9px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #e2e8f0;
+                color: #0f172a;
+                border-color: #94a3b8;
+            }
+        """)
+        self.btn_quicklook.clicked.connect(self._trigger_quicklook)
+
         h_layout.addWidget(self.badge_label)
         h_layout.addLayout(title_col, 1)
+        h_layout.addWidget(self.btn_quicklook)
         layout.addWidget(header_card)
 
         # -------------------------------------------------------------
@@ -523,8 +570,8 @@ class PreviewPanel(QFrame):
 
         self.cot_content_layout.addStretch()
 
-    def set_item(self, item: Optional[SearchResultItem]) -> None:
-        """Update file details, metadata pills, thumbnail, and content."""
+    def set_item(self, item: Optional[SearchResultItem], query: str = "") -> None:
+        """Update file details, metadata pills, thumbnail, and content with optional keyword highlighting."""
         self.current_item = item
         self.qa_response_box.hide()
         self.qa_response_box.setText("")
@@ -599,9 +646,25 @@ class PreviewPanel(QFrame):
         else:
             self.image_preview_box.hide()
 
-        # Text Quick Look
+        # Text Quick Look with Smart Keyword Highlighting
         preview_body = snippet_text if snippet_text else "(Không có nội dung trích đoạn xem trước)"
-        self.preview_text.setPlainText(preview_body)
+        if query and query.strip() and snippet_text:
+            import html
+            import re
+            escaped_body = html.escape(preview_body)
+            # Find query words of length >= 2
+            terms = [re.escape(w) for w in query.strip().split() if len(w) >= 2]
+            if terms:
+                pattern = re.compile(r"(" + "|".join(terms) + r")", re.IGNORECASE)
+                highlighted = pattern.sub(
+                    r'<mark style="background-color: #fef08a; color: #854d0e; padding: 1px 3px; border-radius: 3px; font-weight: 600;">\1</mark>',
+                    escaped_body
+                )
+                self.preview_text.setHtml(f"<div style='font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 11.5px; line-height: 1.45; white-space: pre-wrap;'>{highlighted}</div>")
+            else:
+                self.preview_text.setPlainText(preview_body)
+        else:
+            self.preview_text.setPlainText(preview_body)
 
     def _trigger_ask(self) -> None:
         q = self.ask_input.text().strip()
@@ -620,4 +683,8 @@ class PreviewPanel(QFrame):
         if not self.preview_text.toPlainText() or "💡" in self.preview_text.toPlainText():
             self.preview_text.setPlainText(ans)
         self.set_active_tab(0)
+
+    def _trigger_quicklook(self) -> None:
+        if self.current_item and os.path.exists(self.current_item.file_path):
+            trigger_quicklook(self.current_item.file_path)
 

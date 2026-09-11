@@ -10,15 +10,30 @@ import os
 import sys
 from typing import Callable, Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
 from rat.config import config
 from rat.crawler.db import Database
 from rat.crawler.indexer import Indexer
+from rat.os.daemon import is_launch_agent_installed, set_launch_at_login
 
 logger = logging.getLogger("rat.os.menu_bar")
+
+
+class RescanWorker(QThread):
+    """Background thread worker for manual database rescan."""
+    finished_rescan = pyqtSignal(int, int)
+
+    def __init__(self, db: Database) -> None:
+        super().__init__()
+        self.db = db
+
+    def run(self) -> None:
+        indexer = Indexer(self.db)
+        indexed, total = indexer.run_full_index()
+        self.finished_rescan.emit(indexed, total)
 
 
 def create_tray_pixmap() -> QPixmap:
@@ -52,11 +67,16 @@ class SystemTrayManager:
         self,
         on_open_spotlight: Optional[Callable[[], None]] = None,
         on_open_finder: Optional[Callable[[], None]] = None,
+        on_open_settings: Optional[Callable[[], None]] = None,
+        on_open_schedule: Optional[Callable[[], None]] = None,
     ) -> None:
         self.on_open_spotlight = on_open_spotlight
         self.on_open_finder = on_open_finder
+        self.on_open_settings = on_open_settings
+        self.on_open_schedule = on_open_schedule
         self.tray_icon = QSystemTrayIcon()
         self.db = Database(config.db_path)
+        self.rescan_worker: Optional[RescanWorker] = None
         self._init_tray()
 
     def _init_tray(self) -> None:
@@ -92,6 +112,14 @@ class SystemTrayManager:
             }
         """)
 
+        # Check Accessibility permission
+        from rat.os.hotkey import is_accessibility_trusted, open_accessibility_settings
+        if not is_accessibility_trusted():
+            action_perm = QAction("⚠️ Cấp quyền Phím tắt (Accessibility)...", menu)
+            action_perm.triggered.connect(open_accessibility_settings)
+            menu.addAction(action_perm)
+            menu.addSeparator()
+
         # Search Quick Actions
         action_spotlight = QAction(f"🔍 Tìm kiếm nhanh ({config.get_hotkey_display()})", menu)
         if self.on_open_spotlight:
@@ -103,6 +131,12 @@ class SystemTrayManager:
             action_finder.triggered.connect(self.on_open_finder)
         menu.addAction(action_finder)
 
+        # Club Timetable Compositor Action
+        action_schedule = QAction("🍵 Ghép Lịch CLB & Khung Giờ Vàng...", menu)
+        if self.on_open_schedule:
+            action_schedule.triggered.connect(self.on_open_schedule)
+        menu.addAction(action_schedule)
+
         menu.addSeparator()
 
         # Stats info item (disabled)
@@ -113,9 +147,29 @@ class SystemTrayManager:
         menu.addAction(action_stats)
 
         # Rescan action
-        action_rescan = QAction("🔄 Quét lại kho dữ liệu ngay", menu)
-        action_rescan.triggered.connect(self._trigger_rescan)
-        menu.addAction(action_rescan)
+        self.action_rescan = QAction("🔄 Quét lại kho dữ liệu ngay", menu)
+        self.action_rescan.triggered.connect(self._trigger_rescan)
+        menu.addAction(self.action_rescan)
+
+        # Free RAM Action
+        self.action_free_ram = QAction("🧹 Giải phóng RAM (Evict ML Model)", menu)
+        self.action_free_ram.triggered.connect(self._trigger_free_ram)
+        menu.addAction(self.action_free_ram)
+
+        menu.addSeparator()
+
+        # Settings
+        if self.on_open_settings:
+            action_settings = QAction("⚙️ Cài đặt...", menu)
+            action_settings.triggered.connect(self.on_open_settings)
+            menu.addAction(action_settings)
+
+        # Launch at Login Checkbox
+        action_autostart = QAction("🚀 Tự khởi động cùng macOS", menu)
+        action_autostart.setCheckable(True)
+        action_autostart.setChecked(is_launch_agent_installed() or config.launch_at_login)
+        action_autostart.toggled.connect(self._toggle_launch_at_login)
+        menu.addAction(action_autostart)
 
         menu.addSeparator()
 
@@ -129,18 +183,55 @@ class SystemTrayManager:
         self.tray_icon.show()
         logger.info("macOS System Tray resident item loaded.")
 
+    def _toggle_launch_at_login(self, checked: bool) -> None:
+        set_launch_at_login(checked)
+        status_str = "bật" if checked else "tắt"
+        self.tray_icon.showMessage(
+            "rat — Khởi động cùng macOS",
+            f"Đã {status_str} tự động chạy ngầm khi đăng nhập hệ thống!",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000
+        )
+
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             if self.on_open_spotlight:
                 self.on_open_spotlight()
 
     def _trigger_rescan(self) -> None:
-        logger.info("Rescan triggered from Menu Bar tray.")
-        indexer = Indexer(self.db)
-        indexer.run_full_index()
+        logger.info("Asynchronous rescan triggered from Menu Bar tray.")
+        self.action_rescan.setEnabled(False)
+        self.tray_icon.showMessage(
+            "rat — Bắt đầu quét",
+            "Đang quét kho tệp tin trong nền (QoS Background)...",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000
+        )
+        self.rescan_worker = RescanWorker(self.db)
+        self.rescan_worker.finished_rescan.connect(self._on_rescan_finished)
+        self.rescan_worker.start()
+
+    def _on_rescan_finished(self, indexed: int, total: int) -> None:
+        self.action_rescan.setEnabled(True)
         self.tray_icon.showMessage(
             "rat — Quét hoàn tất",
-            "Đã cập nhật toàn bộ cơ sở dữ liệu tệp tin!",
+            f"Đã cập nhật chỉ mục {indexed}/{total} tệp tin an toàn!",
             QSystemTrayIcon.MessageIcon.Information,
             3000
         )
+
+    def _trigger_free_ram(self) -> None:
+        try:
+            from rat.engine.embedder import embedder
+            was_loaded = embedder.is_loaded
+            embedder.evict()
+            msg = "Đã giải phóng ~300MB RAM thành công!" if was_loaded else "Bộ nhớ RAM mô hình đã ở trạng thái trống (Idle)."
+            self.tray_icon.showMessage(
+                "rat — Quản trị Bộ nhớ RAM",
+                msg,
+                QSystemTrayIcon.MessageIcon.Information,
+                2500,
+            )
+        except Exception as e:
+            logger.error(f"Error freeing RAM: {e}")
+

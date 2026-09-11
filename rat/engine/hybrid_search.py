@@ -120,10 +120,10 @@ class SearchEngine:
         # 2b. Dense Vector Search (VectorCache in-memory dot product)
         dense_chunk_candidates: List[Dict[str, Any]] = []
         hypo_text = None
-        if use_vector and len(clean_q) > 0:
+        if use_vector and len(clean_q) >= 3:
             query_vector = None
             should_use_hyde = use_hyde and config.use_slm and len(clean_q.split()) >= 4
-            if should_use_hyde:
+            if should_use_hyde and self.slm.is_service_running():
                 query_vector, hypo_text, _ = self.hyde.get_hyde_query_vector(clean_q)
 
             if query_vector is None or query_vector.size == 0:

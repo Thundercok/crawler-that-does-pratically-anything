@@ -5,9 +5,9 @@ Renders authentic Apple Dog-Ear document icons, typography hierarchy, and smooth
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Dict, Optional
 
-from PyQt6.QtCore import QModelIndex, QRectF, QSize, Qt
+from PyQt6.QtCore import QFileInfo, QModelIndex, QRectF, QSize, Qt
 from PyQt6.QtGui import (
     QBrush,
     QColor,
@@ -17,8 +17,9 @@ from PyQt6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QPixmap,
 )
-from PyQt6.QtWidgets import QStyle, QStyleOptionViewItem, QStyledItemDelegate
+from PyQt6.QtWidgets import QFileIconProvider, QStyle, QStyleOptionViewItem, QStyledItemDelegate
 
 from rat.engine.reranker import SearchResultItem
 from rat.ui.theme import get_ext_badge_info
@@ -46,6 +47,33 @@ class AppleSpotlightDelegate(QStyledItemDelegate):
 
         self.meta_font = QFont(".AppleSystemUIFont", 10)
         self.meta_font.setWeight(QFont.Weight.Medium)
+
+        # macOS Native System Icon Provider & In-Memory Pixmap Cache
+        self.icon_provider = QFileIconProvider()
+        self._icon_cache: Dict[str, Optional[QPixmap]] = {}
+
+    def _get_system_pixmap(self, file_path: str, ext: str) -> Optional[QPixmap]:
+        """Fetch and cache authentic Retina 32x32 macOS system file icon."""
+        cache_key = ext.lower() if ext else file_path
+        if cache_key in self._icon_cache:
+            return self._icon_cache[cache_key]
+
+        try:
+            import os
+            if file_path and os.path.exists(file_path):
+                qicon = self.icon_provider.icon(QFileInfo(file_path))
+            else:
+                qicon = self.icon_provider.icon(QFileIconProvider.IconType.File)
+
+            if not qicon.isNull():
+                pm = qicon.pixmap(32, 32)
+                self._icon_cache[cache_key] = pm
+                return pm
+        except Exception:
+            pass
+
+        self._icon_cache[cache_key] = None
+        return None
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
         return QSize(option.rect.width(), self.row_height)
@@ -126,10 +154,18 @@ class AppleSpotlightDelegate(QStyledItemDelegate):
         painter.setPen(QColor("#007aff") if is_selected else QColor("#8e8e93"))
         painter.drawText(stt_rect, Qt.AlignmentFlag.AlignCenter, str(stt_num))
 
-        # 3. Apple Dog-Ear Document Icon (30x36px)
-        badge_info = get_ext_badge_info(getattr(item, "file_ext", ""))
-        doc_rect = QRectF(rect.x() + 36, rect.y() + (rect.height() - 36) / 2, 30, 36)
-        self._draw_apple_document_icon(painter, doc_rect, badge_info["bg"], badge_info["label"])
+        # 3. Native macOS Retina Icon or Apple Dog-Ear Document Icon (32x32px)
+        ext = getattr(item, "file_ext", "")
+        file_path = getattr(item, "file_path", "")
+        sys_pm = self._get_system_pixmap(file_path, ext)
+        if sys_pm and not sys_pm.isNull():
+            pm_x = int(rect.x() + 35)
+            pm_y = int(rect.y() + (rect.height() - 32) / 2)
+            painter.drawPixmap(pm_x, pm_y, 32, 32, sys_pm)
+        else:
+            badge_info = get_ext_badge_info(ext)
+            doc_rect = QRectF(rect.x() + 36, rect.y() + (rect.height() - 36) / 2, 30, 36)
+            self._draw_apple_document_icon(painter, doc_rect, badge_info["bg"], badge_info["label"])
 
         # Text Area Boundaries
         text_x = rect.x() + 76

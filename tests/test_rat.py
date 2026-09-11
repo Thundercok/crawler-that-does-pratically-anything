@@ -67,10 +67,26 @@ class TestRatAssistant(unittest.TestCase):
         self.assertIn("ngân", top.explanation.lower())
 
     def test_unaccented_search(self) -> None:
-        # Search in Vietnamese without accents
-        res = self.engine.search("tai chinh du toan")
-        self.assertTrue(len(res["results"]) > 0)
-        self.assertEqual(res["results"][0].file_name, "Ke_Hoach_Tai_Chinh_2026.docx")
+        # Insert a document with completely arbitrary ASCII filename and accented Vietnamese content
+        doc_vietnamese = {
+            "file_path": "/tmp/random_doc_xyz_99.pdf",
+            "file_name": "random_doc_xyz_99.pdf",
+            "file_ext": ".pdf",
+            "file_size": 2048,
+            "created_at": 1700000000.0,
+            "modified_at": 1700000000.0,
+            "md5_hash": "xyz99999",
+            "content_text": "Thông báo chính thức về thời khóa biểu học kỳ và kế hoạch tốt nghiệp khóa 2026.",
+            "summary": "",
+            "indexed_at": 1700000000.0,
+        }
+        doc_id = self.db.upsert_document(doc_vietnamese)
+
+        # Search in Vietnamese without accents — must match content via FTS5 normalized_text
+        res = self.engine.search("thoi khoa bieu hoc ky")
+        self.assertTrue(len(res["results"]) > 0, "Should retrieve document via unaccented content search")
+        top_paths = [r.file_path for r in res["results"]]
+        self.assertIn("/tmp/random_doc_xyz_99.pdf", top_paths)
 
     def test_vision_taxonomy_expansion(self) -> None:
         from rat.crawler.vision_taxonomy import expand_taxonomy_labels

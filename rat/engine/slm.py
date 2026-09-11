@@ -111,6 +111,8 @@ class SLMEngine:
         timeout: float = 25.0
     ) -> Optional[str]:
         """Send prompt to local SLM and receive completion."""
+        if not self.is_service_running():
+            return None
         url = f"{self.ollama_url}/api/generate"
         payload: Dict[str, Any] = {
             "model": self.model,

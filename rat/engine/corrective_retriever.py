@@ -183,7 +183,7 @@ class CorrectiveRetriever:
                 ))
 
         # 5. Correct Semantic Gaps: Activate HyDE Speculative Expansion
-        if ("semantic" in report.missing_facets or report.confidence < 0.45) and config.use_slm:
+        if ("semantic" in report.missing_facets or report.confidence < 0.45) and config.use_slm and self.slm.is_service_running():
             try:
                 hyde_vec, hypo_doc, expanded_queries = self.hyde.get_hyde_query_vector(plan.raw_query)
                 if hyde_vec is not None and hyde_vec.size > 0:

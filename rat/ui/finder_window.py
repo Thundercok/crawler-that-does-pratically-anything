@@ -812,6 +812,12 @@ class FinderWindow(QMainWindow):
         self.results_list.setFocus()
 
     def closeEvent(self, event: Any) -> None:
+        app = QApplication.instance()
+        if app and not getattr(app, "_is_quitting", False):
+            event.ignore()
+            self.hide()
+            return
+
         self.search_thread.quit()
         self.qa_thread.quit()
         event.accept()

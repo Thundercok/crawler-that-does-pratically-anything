@@ -45,6 +45,9 @@ def main() -> None:
         elif cmd == "spotlight":
             run_resident_app(mode="spotlight")
             return
+        elif cmd in ("schedule", "tkb", "lich"):
+            run_resident_app(mode="schedule")
+            return
 
     # Default: launch resident app with full AI Finder window
     run_resident_app(mode="finder")

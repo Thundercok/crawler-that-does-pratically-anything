@@ -10,6 +10,7 @@ from typing import Optional
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -53,7 +54,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent: Optional[QWidget] = None, on_settings_changed=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Cài đặt 'rat' — Trợ lý Tìm kiếm Tệp tin")
-        self.setFixedSize(560, 600)
+        self.setFixedSize(560, 660)
         self.on_settings_changed = on_settings_changed
         self.indexer = Indexer()
         self._init_ui()
@@ -163,7 +164,61 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(index_group)
 
-        # 3. Local SLM Group (On-Device)
+        # 3. System Integration & Auto-start Group
+        sys_group = QGroupBox("🖥️ Tích hợp hệ điều hành & Khởi động")
+        sys_layout = QVBoxLayout(sys_group)
+        sys_layout.setSpacing(6)
+
+        from rat.os.daemon import is_launch_agent_installed
+        self.chk_launch_at_login = QCheckBox("Tự khởi động cùng macOS khi đăng nhập (Launch at Login)")
+        self.chk_launch_at_login.setChecked(is_launch_agent_installed() or config.launch_at_login)
+        sys_layout.addWidget(self.chk_launch_at_login)
+
+        hotkey_box = QVBoxLayout()
+        hotkey_box.setSpacing(4)
+        hotkey_lbl = QLabel("⌨️ Phím tắt toàn cầu gọi Spotlight (Global Hotkey):")
+        hotkey_lbl.setStyleSheet("color: #e4e4e7; font-size: 12px; font-weight: 500;")
+        hotkey_box.addWidget(hotkey_lbl)
+
+        self.combo_hotkey = QComboBox()
+        self.combo_hotkey.setStyleSheet("""
+            QComboBox {
+                background-color: #27272a;
+                color: #f4f4f5;
+                border: 1px solid #3f3f46;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #18181b;
+                color: #f4f4f5;
+                selection-background-color: #3b82f6;
+                selection-color: #ffffff;
+            }
+        """)
+        self.combo_hotkey.addItem("⌘ ⇧ Space (Command + Shift + Space) — Chuẩn RAT [Mặc định]", "<cmd>+<shift>+<space>")
+        self.combo_hotkey.addItem("⌥ Space (Option + Space) — Chuẩn Raycast / Alfred", "<alt>+<space>")
+        self.combo_hotkey.addItem("⌥ R (Option + R) — Gợi nhớ RAT", "<alt>+r")
+        self.combo_hotkey.addItem("⌥ ⇧ Space (Option + Shift + Space)", "<alt>+<shift>+<space>")
+
+        curr_hotkey = config.global_hotkey.strip()
+        found_idx = self.combo_hotkey.findData(curr_hotkey)
+        if found_idx >= 0:
+            self.combo_hotkey.setCurrentIndex(found_idx)
+        else:
+            self.combo_hotkey.addItem(f"Tùy chỉnh ({config.get_hotkey_display()})", curr_hotkey)
+            self.combo_hotkey.setCurrentIndex(self.combo_hotkey.count() - 1)
+
+        hotkey_box.addWidget(self.combo_hotkey)
+        sys_layout.addLayout(hotkey_box)
+
+        layout.addWidget(sys_group)
+
+        # 4. Local SLM Group (On-Device)
         slm_group = QGroupBox("🧠 Mô hình ngôn ngữ nhỏ SLM (Cục bộ on-device)")
         slm_layout = QVBoxLayout(slm_group)
         slm_layout.setSpacing(8)
@@ -182,7 +237,7 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(slm_group)
 
-        # 4. LLM API Keys Group (Optional Cloud)
+        # 5. LLM API Keys Group (Optional Cloud)
         llm_group = QGroupBox("☁️ Cloud AI / LLM (Tùy chọn)")
         llm_layout = QFormLayout(llm_group)
         llm_layout.setSpacing(8)
@@ -273,7 +328,20 @@ class SettingsDialog(QDialog):
         config.openai_api_key = self.input_openai.text().strip()
         config.auto_watch = self.chk_autowatch.isChecked()
         config.use_slm = self.chk_slm.isChecked()
+
+        # Update global hotkey if changed
+        chosen_hotkey = self.combo_hotkey.currentData()
+        if chosen_hotkey and chosen_hotkey != config.global_hotkey:
+            config.global_hotkey = chosen_hotkey
+            from rat.os.hotkey import restart_global_hotkey
+            restart_global_hotkey()
+
         config.save()
+
+        # Update Launch at Login status
+        from rat.os.daemon import set_launch_at_login
+        want_launch = self.chk_launch_at_login.isChecked()
+        set_launch_at_login(want_launch)
 
         if self.on_settings_changed:
             self.on_settings_changed()

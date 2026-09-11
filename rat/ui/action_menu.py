@@ -155,10 +155,13 @@ class ActionMenuDialog(QDialog):
     def _populate_actions(self) -> None:
         self.actions = [
             ("open", "⚡ Mở tệp (Open)", "↵", "Mở bằng ứng dụng mặc định của hệ thống"),
+            ("quicklook", "👁️ Xem nhanh (Quick Look)", "Space / ⌘Y", "Mở cửa sổ xem nhanh nguyên bản của macOS"),
             ("finder", "📁 Mở trong Finder", "⌘↵", "Mở thư mục chứa và chọn tệp tin"),
+            ("terminal", "💻 Mở thư mục trong Terminal", "⌥↵", "Mở thư mục chứa tệp này trong Terminal"),
             ("copy_path", "📋 Sao chép đường dẫn (Copy Path)", "⌘C", "Sao chép đường dẫn tuyệt đối vào clipboard"),
             ("copy_content", "📄 Sao chép nội dung văn bản", "⌘⇧C", "Sao chép toàn bộ văn bản đã trích xuất"),
             ("ask_ai", "🧠 Hỏi đáp AI với tệp này", "⌘A", "Mở khung trò chuyện với SLM Qwen2.5"),
+            ("schedule", "🍵 Ghép Lịch CLB & Khung Giờ Vàng", "⌘T", "Mở bộ ghép thời khóa biểu sinh viên & tìm giờ rảnh"),
             ("reindex_file", "🔄 Quét lại tệp tin này", "⌘R", "Cập nhật lại chỉ mục và vector cho tệp"),
             ("settings", "⚙️ Cài đặt hệ thống", "⌘,", "Mở bảng cấu hình thư mục và mô hình AI"),
         ]
