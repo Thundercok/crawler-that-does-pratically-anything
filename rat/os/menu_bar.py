@@ -27,13 +27,14 @@ class RescanWorker(QThread):
     finished_rescan = pyqtSignal(int, int)
 
     def __init__(self, db: Database) -> None:
-        super().__init__()
+        super().__init__(None)  # Explicitly unparented for zero-crash destruction
         self.db = db
 
     def run(self) -> None:
         indexer = Indexer(self.db)
         indexed, total = indexer.run_full_index()
-        self.finished_rescan.emit(indexed, total)
+        if not self.isInterruptionRequested():
+            self.finished_rescan.emit(indexed, total)
 
 
 def create_tray_pixmap() -> QPixmap:
@@ -234,4 +235,20 @@ class SystemTrayManager:
             )
         except Exception as e:
             logger.error(f"Error freeing RAM: {e}")
+
+    def shutdown(self) -> None:
+        """Safely terminate any active background rescan worker."""
+        if hasattr(self, "rescan_worker") and self.rescan_worker is not None:
+            try:
+                if self.rescan_worker.isRunning():
+                    self.rescan_worker.requestInterruption()
+                    self.rescan_worker.quit()
+                    if not self.rescan_worker.wait(1500):
+                        self.rescan_worker.terminate()
+                        self.rescan_worker.wait(500)
+                self.rescan_worker.deleteLater()
+            except Exception as e:
+                logger.debug(f"Tray rescan worker shutdown note: {e}")
+            finally:
+                self.rescan_worker = None
 

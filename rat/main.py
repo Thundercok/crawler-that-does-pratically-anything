@@ -9,8 +9,12 @@ import sys
 
 from rat.cli import main as cli_main
 from rat.os.app import run_resident_app
+from rat.os.crash_shield import install_crash_shield
 from rat.os.daemon import install_launch_agent, uninstall_launch_agent
 from rat.os.shell_integration import generate_shell_init_script, install_to_user_zshrc
+
+# Engage Enterprise-Grade Crash Shield & Exception Governance immediately
+install_crash_shield()
 
 logging.basicConfig(
     level=logging.INFO,

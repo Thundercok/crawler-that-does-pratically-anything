@@ -46,6 +46,7 @@ class TestSpotlightWindow(unittest.TestCase):
 
     def tearDown(self):
         if hasattr(self, "window") and self.window is not None:
+            self.window.shutdown()
             self.window.close()
             self.window.deleteLater()
             app.processEvents()

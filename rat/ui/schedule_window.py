@@ -742,5 +742,19 @@ class ScheduleCompositorWindow(QMainWindow):
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            self.close()
+            self.hide()
+            return
         super().keyPressEvent(event)
+
+    def shutdown(self) -> None:
+        """Safe cleanup when application quits."""
+        pass
+
+    def closeEvent(self, event) -> None:
+        app = QApplication.instance()
+        if app and not getattr(app, "_is_quitting", False):
+            event.ignore()
+            self.hide()
+            return
+        self.shutdown()
+        super().closeEvent(event)

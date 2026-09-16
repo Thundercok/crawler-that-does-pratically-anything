@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import QApplication
 
 from rat.config import config
 from rat.crawler.watcher import Watcher
+from rat.os.crash_shield import install_crash_shield
 from rat.os.hotkey import GlobalHotkeyManager
 from rat.os.menu_bar import SystemTrayManager
 from rat.ui.finder_window import FinderWindow
@@ -43,11 +44,13 @@ class ResidentApplication(QObject):
     open_schedule_signal = pyqtSignal()
 
     def __init__(self, mode: str = "all") -> None:
+        install_crash_shield()
         self.app = QApplication.instance() or QApplication(sys.argv)
         super().__init__()
         self.mode = mode
         self.app.setApplicationName("rat — macOS Smart AI File Finder")
         self.app.setQuitOnLastWindowClosed(False)  # Keep running in menu bar
+        self.app._is_quitting = False
 
         self.spotlight_window: Optional[SpotlightWindow] = None
         self.finder_window: Optional[FinderWindow] = None
@@ -65,17 +68,71 @@ class ResidentApplication(QObject):
         self.app.aboutToQuit.connect(self._on_app_quit)
 
     def _on_app_quit(self) -> None:
-        """Clean shutdown of background services on app exit."""
+        """Comprehensive zero-crash shutdown of all background services and UI threads."""
+        logger.info("ResidentApplication: Initiating zero-crash graceful teardown...")
+        self.app._is_quitting = True
+
+        # 1. Stop UI Windows & their background QThreads
+        if self.spotlight_window:
+            try:
+                if hasattr(self.spotlight_window, "shutdown"):
+                    self.spotlight_window.shutdown()
+                elif hasattr(self.spotlight_window, "search_thread") and self.spotlight_window.search_thread:
+                    if self.spotlight_window.search_thread.isRunning():
+                        self.spotlight_window.search_thread.quit()
+                        self.spotlight_window.search_thread.wait(1000)
+            except Exception as e:
+                logger.debug(f"Error shutting down spotlight_window: {e}")
+
+        if self.finder_window:
+            try:
+                if hasattr(self.finder_window, "shutdown"):
+                    self.finder_window.shutdown()
+                else:
+                    if hasattr(self.finder_window, "search_thread") and self.finder_window.search_thread and self.finder_window.search_thread.isRunning():
+                        self.finder_window.search_thread.quit()
+                        self.finder_window.search_thread.wait(1000)
+                    if hasattr(self.finder_window, "qa_thread") and self.finder_window.qa_thread and self.finder_window.qa_thread.isRunning():
+                        self.finder_window.qa_thread.quit()
+                        self.finder_window.qa_thread.wait(1000)
+            except Exception as e:
+                logger.debug(f"Error shutting down finder_window: {e}")
+
+        if self.schedule_window:
+            try:
+                if hasattr(self.schedule_window, "shutdown"):
+                    self.schedule_window.shutdown()
+            except Exception as e:
+                logger.debug(f"Error shutting down schedule_window: {e}")
+
+        # 2. Stop Menu Bar Tray & worker
+        if self.tray_manager:
+            try:
+                if hasattr(self.tray_manager, "shutdown"):
+                    self.tray_manager.shutdown()
+            except Exception as e:
+                logger.debug(f"Error shutting down tray_manager: {e}")
+
+        # 3. Stop background system services
         if self.memory_sentinel:
             try:
                 self.memory_sentinel.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error stopping memory_sentinel: {e}")
+
         if self.watcher:
             try:
                 self.watcher.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error stopping watcher: {e}")
+
+        if self.hotkey_manager:
+            try:
+                self.hotkey_manager.stop()
+            except Exception as e:
+                logger.debug(f"Error stopping hotkey_manager: {e}")
+
+        logger.info("ResidentApplication: Teardown complete. Exiting cleanly.")
 
     def toggle_spotlight(self) -> None:
         """Thread-safe trigger (can be called from background hotkey threads)."""

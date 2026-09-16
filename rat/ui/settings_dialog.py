@@ -37,15 +37,17 @@ class IndexWorker(QThread):
     finished_indexing = pyqtSignal(int, int)
 
     def __init__(self, indexer: Indexer) -> None:
-        super().__init__()
+        super().__init__(None)  # Explicitly unparented for zero-crash destruction
         self.indexer = indexer
 
     def run(self) -> None:
         def on_prog(done: int, total: int, filename: str) -> None:
-            self.progress.emit(done, total, filename)
+            if not self.isInterruptionRequested():
+                self.progress.emit(done, total, filename)
 
         indexed, total = self.indexer.run_full_index(progress_callback=on_prog)
-        self.finished_indexing.emit(indexed, total)
+        if not self.isInterruptionRequested():
+            self.finished_indexing.emit(indexed, total)
 
 
 class SettingsDialog(QDialog):
@@ -346,3 +348,27 @@ class SettingsDialog(QDialog):
         if self.on_settings_changed:
             self.on_settings_changed()
         self.accept()
+
+    def _shutdown_worker(self) -> None:
+        """Safely terminate IndexWorker thread if still active."""
+        if hasattr(self, "worker") and self.worker is not None:
+            try:
+                if self.worker.isRunning():
+                    self.worker.requestInterruption()
+                    self.worker.quit()
+                    if not self.worker.wait(1500):
+                        self.worker.terminate()
+                        self.worker.wait(500)
+                self.worker.deleteLater()
+            except Exception as e:
+                logger.debug(f"Settings worker shutdown note: {e}")
+            finally:
+                self.worker = None
+
+    def closeEvent(self, event) -> None:
+        self._shutdown_worker()
+        super().closeEvent(event)
+
+    def reject(self) -> None:
+        self._shutdown_worker()
+        super().reject()

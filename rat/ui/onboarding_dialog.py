@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -177,9 +177,9 @@ class OnboardingDialog(QDialog):
         acc_text_col.addWidget(acc_desc)
         acc_layout.addLayout(acc_text_col, 1)
 
-        btn_acc = QPushButton("Mở Cài đặt")
-        btn_acc.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_acc.setStyleSheet("""
+        self.btn_acc = QPushButton("Mở Cài đặt")
+        self.btn_acc.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_acc.setStyleSheet("""
             QPushButton {
                 background-color: #e0e7ff;
                 color: #3730a3;
@@ -191,8 +191,8 @@ class OnboardingDialog(QDialog):
             }
             QPushButton:hover { background-color: #c7d2fe; }
         """)
-        btn_acc.clicked.connect(open_accessibility_settings)
-        acc_layout.addWidget(btn_acc)
+        self.btn_acc.clicked.connect(open_accessibility_settings)
+        acc_layout.addWidget(self.btn_acc)
         container_layout.addWidget(acc_card)
 
         # Card: Full Disk Access
@@ -271,7 +271,34 @@ class OnboardingDialog(QDialog):
 
         main_layout.addWidget(container)
 
+        # Setup real-time permission status watcher
+        self._check_timer = QTimer(self)
+        self._check_timer.setInterval(1500)
+        self._check_timer.timeout.connect(self._refresh_permission_status)
+        self._check_timer.start()
+        self._refresh_permission_status()
+
+    def _refresh_permission_status(self) -> None:
+        """Check live macOS Accessibility status and update button UI immediately."""
+        if check_accessibility_status():
+            self.btn_acc.setText("✓ Đã cấp quyền")
+            self.btn_acc.setEnabled(False)
+            self.btn_acc.setStyleSheet("""
+                QPushButton {
+                    background-color: #dcfce7;
+                    color: #15803d;
+                    border: 1px solid #bbf7d0;
+                    border-radius: 6px;
+                    padding: 4px 10px;
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+            """)
+
     def _on_finish(self) -> None:
+        if hasattr(self, "_check_timer") and self._check_timer:
+            self._check_timer.stop()
+
         # Save selected directories
         selected = []
         for cb in self.dir_checkboxes:
@@ -289,3 +316,8 @@ class OnboardingDialog(QDialog):
         config.save()
         self.setup_completed.emit()
         self.accept()
+
+    def reject(self) -> None:
+        if hasattr(self, "_check_timer") and self._check_timer:
+            self._check_timer.stop()
+        super().reject()

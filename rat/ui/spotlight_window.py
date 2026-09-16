@@ -281,7 +281,8 @@ class SpotlightWindow(QMainWindow):
         self._load_initial_data()
 
     def _init_thread(self) -> None:
-        self.search_thread = QThread(self)
+        # Crucial: Unparented QThread(None) prevents Qt C++ child destruction SIGABRT
+        self.search_thread = QThread(None)
         self.worker = SearchWorker(self.engine)
         self.worker.moveToThread(self.search_thread)
         self.search_requested.connect(self.worker.do_search)
@@ -784,6 +785,28 @@ class SpotlightWindow(QMainWindow):
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             event.accept()
 
+    def shutdown(self) -> None:
+        """Gracefully stop search thread, timers, and clean up resources with zero hang/crash."""
+        try:
+            if hasattr(self, "search_timer") and self.search_timer.isActive():
+                self.search_timer.stop()
+        except Exception:
+            pass
+
+        if hasattr(self, "search_thread") and self.search_thread is not None:
+            try:
+                if self.search_thread.isRunning():
+                    self.search_thread.quit()
+                    if not self.search_thread.wait(1500):
+                        logger.warning("Spotlight search_thread did not terminate in 1.5s; forcing...")
+                        self.search_thread.terminate()
+                        self.search_thread.wait(500)
+                self.search_thread.deleteLater()
+            except Exception as e:
+                logger.debug(f"Spotlight shutdown thread cleanup note: {e}")
+            finally:
+                self.search_thread = None
+
     def closeEvent(self, event) -> None:
         # Keep pre-warmed unless application is quitting
         app = QApplication.instance()
@@ -792,7 +815,5 @@ class SpotlightWindow(QMainWindow):
             self.hide()
             return
 
-        if hasattr(self, "search_thread") and self.search_thread.isRunning():
-            self.search_thread.quit()
-            self.search_thread.wait()
+        self.shutdown()
         super().closeEvent(event)

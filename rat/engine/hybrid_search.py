@@ -218,13 +218,14 @@ class SearchEngine:
         # Phase 4: Zero-Cloud Corrective Cascading Loop (Conditional)
         # -----------------------------------------------------------------
         correction_count = 0
-        if not report.is_sufficient and (report.missing_facets or report.confidence < 0.68):
+        if not report.is_sufficient and (report.missing_facets or report.confidence < 0.68) and len(clean_q) >= 3:
             t_phase4 = time.time()
             correct_res = self.corrector.correct(
                 plan=plan,
                 report=report,
                 current_candidates=fused_candidates,
                 iteration=1,
+                allow_slm=use_hyde and len(clean_q) >= 3,
             )
             correction_count = len(correct_res.actions)
             fused_candidates = correct_res.recovered_candidates

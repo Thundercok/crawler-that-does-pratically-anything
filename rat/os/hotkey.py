@@ -70,11 +70,32 @@ class GlobalHotkeyManager:
         self.on_trigger = on_trigger
         self._listener = None
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._monitor_thread: Optional[threading.Thread] = None
+        self._stop_monitor_event = threading.Event()
+
+    def _start_permission_monitor(self) -> None:
+        """Start a background monitor that auto-rebinds hotkeys once Accessibility is granted."""
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            return
+        self._stop_monitor_event.clear()
+        self._monitor_thread = threading.Thread(
+            target=self._monitor_permission_loop,
+            daemon=True,
+            name="rat-hotkey-permission-monitor",
+        )
+        self._monitor_thread.start()
+
+    def _monitor_permission_loop(self) -> None:
+        """Polls every 3s to detect when user grants Accessibility permission in System Settings."""
+        while not self._stop_monitor_event.wait(3.0):
+            if is_accessibility_trusted():
+                logger.info("Accessibility permission newly granted! Auto-reconnecting Global Hotkey Manager...")
+                self.restart()
+                break
 
     def start(self) -> bool:
         """Start listening for global hotkeys in a background thread."""
-        if self._running:
+        if self._running and is_accessibility_trusted():
             return True
 
         if not is_accessibility_trusted():
@@ -83,14 +104,20 @@ class GlobalHotkeyManager:
                 "Global hotkeys require Accessibility in System Settings -> Privacy & Security -> Accessibility."
             )
             request_accessibility_permission()
+            self._start_permission_monitor()
+        else:
+            self._stop_monitor_event.set()
 
         try:
             from pynput import keyboard
 
             def _handle_activate() -> None:
-                logger.info("Global hotkey triggered!")
-                if self.on_trigger:
-                    self.on_trigger()
+                try:
+                    logger.info("Global hotkey triggered!")
+                    if self.on_trigger:
+                        self.on_trigger()
+                except Exception as trigger_err:
+                    logger.error(f"Error in global hotkey trigger callback: {trigger_err}", exc_info=True)
 
             # Command+Shift+Space as primary requested shortcut, with Option+Space & Option+R fallbacks
             primary = config.global_hotkey.strip()
@@ -112,10 +139,12 @@ class GlobalHotkeyManager:
             return True
         except Exception as e:
             logger.warning(f"Failed to start GlobalHotKeys listener: {e}")
+            self._start_permission_monitor()
             return False
 
     def stop(self) -> None:
         """Stop listening for global shortcuts."""
+        self._stop_monitor_event.set()
         if self._listener:
             try:
                 self._listener.stop()

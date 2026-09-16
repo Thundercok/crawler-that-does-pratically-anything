@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import time
 import threading
+import warnings
 from typing import List, Optional, Union
 
 import numpy as np
@@ -64,7 +65,9 @@ class LocalEmbedder:
                     try:
                         from fastembed import TextEmbedding
                         logger.info(f"Loading local embedding model: {self.model_name}")
-                        self._model = TextEmbedding(model_name=self.model_name)
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings("ignore", message=".*uses mean pooling instead of CLS embedding.*")
+                            self._model = TextEmbedding(model_name=self.model_name)
                         # Determine dimension with a dummy embedding
                         dummy = list(self._model.embed(["test"]))[0]
                         self._dimension = len(dummy)

@@ -441,8 +441,8 @@ class FinderWindow(QMainWindow):
         self._dispatch_search()
 
     def _init_threads(self) -> None:
-        # Search Thread
-        self.search_thread = QThread(self)
+        # Crucial: Unparented QThread(None) prevents Qt C++ child destruction SIGABRT
+        self.search_thread = QThread(None)
         self.search_worker = AsyncSearchWorker(self.engine)
         self.search_worker.moveToThread(self.search_thread)
         self.search_requested.connect(self.search_worker.execute_query)
@@ -450,7 +450,7 @@ class FinderWindow(QMainWindow):
         self.search_thread.start()
 
         # QA Thread
-        self.qa_thread = QThread(self)
+        self.qa_thread = QThread(None)
         self.qa_worker = AsyncQAWorker()
         self.qa_worker.moveToThread(self.qa_thread)
         self.ask_requested.connect(self.qa_worker.ask_document)
@@ -811,6 +811,42 @@ class FinderWindow(QMainWindow):
         self.search_input.clear()
         self.results_list.setFocus()
 
+    def shutdown(self) -> None:
+        """Gracefully stop background search and QA threads with zero hang/crash."""
+        try:
+            if hasattr(self, "search_timer") and self.search_timer.isActive():
+                self.search_timer.stop()
+        except Exception:
+            pass
+
+        if hasattr(self, "search_thread") and self.search_thread is not None:
+            try:
+                if self.search_thread.isRunning():
+                    self.search_thread.quit()
+                    if not self.search_thread.wait(1500):
+                        logger.warning("Finder search_thread did not exit in 1.5s; forcing...")
+                        self.search_thread.terminate()
+                        self.search_thread.wait(500)
+                self.search_thread.deleteLater()
+            except Exception as e:
+                logger.debug(f"Finder shutdown search_thread note: {e}")
+            finally:
+                self.search_thread = None
+
+        if hasattr(self, "qa_thread") and self.qa_thread is not None:
+            try:
+                if self.qa_thread.isRunning():
+                    self.qa_thread.quit()
+                    if not self.qa_thread.wait(1500):
+                        logger.warning("Finder qa_thread did not exit in 1.5s; forcing...")
+                        self.qa_thread.terminate()
+                        self.qa_thread.wait(500)
+                self.qa_thread.deleteLater()
+            except Exception as e:
+                logger.debug(f"Finder shutdown qa_thread note: {e}")
+            finally:
+                self.qa_thread = None
+
     def closeEvent(self, event: Any) -> None:
         app = QApplication.instance()
         if app and not getattr(app, "_is_quitting", False):
@@ -818,8 +854,7 @@ class FinderWindow(QMainWindow):
             self.hide()
             return
 
-        self.search_thread.quit()
-        self.qa_thread.quit()
+        self.shutdown()
         event.accept()
 
 
